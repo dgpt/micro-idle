@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include "raylib.h"
 
-#define MAX_MICROBES 512
+#define MAX_MICROBES 12000
 #define MAX_ZONES 32
 
 typedef struct GameState GameState;

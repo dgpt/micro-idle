@@ -37,6 +37,18 @@ target_compile_definitions(game PRIVATE
     $<$<BOOL:${DETERMINISM}>:DETERMINISM_MODE>
 )
 
+add_executable(tests
+    apps/tests/test_main.c
+    apps/tests/test_time.c
+    apps/tests/test_rng.c
+    apps/tests/test_game_constants.c
+    engine/time.c
+    engine/util/rng.c
+)
+target_include_directories(tests PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+target_link_libraries(tests PRIVATE raylib)
+
 if (UNIX AND NOT APPLE)
     target_link_libraries(game PRIVATE m)
+    target_link_libraries(tests PRIVATE m)
 endif()
