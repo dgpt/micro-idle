@@ -129,7 +129,6 @@ struct GameState {
     Vector3 hover_pos;
     bool hover_valid;
     bool show_bounds;
-    bool high_quality;
 };
 
 static void cleanup_dead(GameState *game);
@@ -252,13 +251,14 @@ static void resolve_collisions(GameState *game, float dt) {
                         b->vel.z += n.z * impulse * inv_mass_b;
                     }
 
-                    float softness = overlap * 4.0f;
+                    float softness = overlap * 10.0f;
                     a->vel.x -= n.x * softness * dt * inv_mass_a;
                     a->vel.z -= n.z * softness * dt * inv_mass_a;
                     b->vel.x += n.x * softness * dt * inv_mass_b;
                     b->vel.z += n.z * softness * dt * inv_mass_b;
 
                     float squish = overlap / fmaxf(radius, 0.001f);
+                    squish = clampf(squish * 1.8f, 0.0f, 1.2f);
                     if (squish > a->squish) a->squish = squish;
                     if (squish > b->squish) b->squish = squish;
                 }
@@ -577,7 +577,6 @@ void game_init(GameState *game, uint64_t seed) {
     game->aoe_cooldown = 6.0f;
     game->aoe_timer = 0.0f;
     game->pulse_timer = 0.0f;
-    game->high_quality = false;
 
     for (int i = 0; i < 20; ++i) {
         push_microbe(game);
@@ -619,7 +618,7 @@ void game_update_fixed(GameState *game, float dt) {
         m->wobble += dt * (1.2f + 0.4f * m->twist);
         m->phase += dt * (0.8f + 0.6f * m->drift);
         m->pulse += dt * (1.4f + 0.3f * m->twist);
-        m->squish -= dt * 2.5f;
+        m->squish -= dt * 1.2f;
         if (m->squish < 0.0f) {
             m->squish = 0.0f;
         }
@@ -748,23 +747,26 @@ static void draw_microbe_form(const Microbe *m, Color base_color, float t, int d
     Vector3 pos = m->pos;
     float size = m->size;
     bool photosynth = (m->traits & (1u << TRAIT_PHOTOSYNTH)) != 0u;
-    float squish = clampf(m->squish, 0.0f, 0.8f);
-    float thickness = size * (0.18f + squish * 0.08f);
+    float squish = clampf(m->squish, 0.0f, 1.2f);
+    float thickness = size * (0.16f + squish * 0.16f);
+    Color body = (Color){base_color.r, base_color.g, base_color.b, 150};
+    Color inner = (Color){base_color.r, base_color.g, base_color.b, 90};
     Color edge = (Color){(unsigned char)(base_color.r * 0.6f),
                          (unsigned char)(base_color.g * 0.6f),
-                         (unsigned char)(base_color.b * 0.6f), 220};
+                         (unsigned char)(base_color.b * 0.6f), 200};
 
     switch (m->form) {
         case FORM_COCCUS:
-            draw_disc(pos, size, thickness, base_color);
+            draw_disc(pos, size, thickness, body);
+            draw_disc(pos, size * 0.75f, thickness * 0.8f, inner);
             if (detail > 0) draw_outline(pos, size * 1.01f, edge);
             break;
         case FORM_BACILLUS: {
             Vector3 start = {pos.x - size * 0.9f, pos.y, pos.z};
             Vector3 end = {pos.x + size * 0.9f, pos.y, pos.z};
-            DrawCylinderEx(start, end, size * 0.45f, size * 0.45f, 12, base_color);
-            draw_disc(start, size * 0.45f, thickness, base_color);
-            draw_disc(end, size * 0.45f, thickness, base_color);
+            DrawCylinderEx(start, end, size * 0.45f, size * 0.45f, 12, body);
+            draw_disc(start, size * 0.45f, thickness, body);
+            draw_disc(end, size * 0.45f, thickness, body);
             if (detail > 0) {
                 draw_outline(start, size * 0.48f, edge);
                 draw_outline(end, size * 0.48f, edge);
@@ -773,9 +775,9 @@ static void draw_microbe_form(const Microbe *m, Color base_color, float t, int d
         case FORM_VIBRIO: {
             Vector3 start = {pos.x - size * 0.7f, pos.y, pos.z - size * 0.3f};
             Vector3 end = {pos.x + size * 0.7f, pos.y, pos.z + size * 0.3f};
-            DrawCylinderEx(start, end, size * 0.45f, size * 0.45f, 12, base_color);
-            draw_disc(start, size * 0.45f, thickness, base_color);
-            draw_disc(end, size * 0.45f, thickness, base_color);
+            DrawCylinderEx(start, end, size * 0.45f, size * 0.45f, 12, body);
+            draw_disc(start, size * 0.45f, thickness, body);
+            draw_disc(end, size * 0.45f, thickness, body);
             if (detail > 0) {
                 draw_outline(start, size * 0.48f, edge);
                 draw_outline(end, size * 0.48f, edge);
@@ -784,7 +786,7 @@ static void draw_microbe_form(const Microbe *m, Color base_color, float t, int d
         case FORM_SPIRILLUM: {
             for (int i = -2; i <= 2; ++i) {
                 Vector3 p = {pos.x + i * size * 0.35f, pos.y, pos.z + sinf((float)i) * size * 0.25f};
-                draw_disc(p, size * 0.28f, thickness, base_color);
+                draw_disc(p, size * 0.28f, thickness, body);
             }
         } break;
         case FORM_FILAMENT: {
@@ -792,30 +794,30 @@ static void draw_microbe_form(const Microbe *m, Color base_color, float t, int d
                 float step = (float)i - 3.0f;
                 float bend = sinf(t * 1.5f + m->phase + step * 0.8f) * size * 0.25f;
                 Vector3 p = {pos.x + step * size * 0.45f, pos.y, pos.z + bend};
-                draw_disc(p, size * 0.22f, thickness, base_color);
+                draw_disc(p, size * 0.22f, thickness, body);
             }
         } break;
         case FORM_STELLATE: {
-            draw_disc(pos, size * 0.5f, thickness, base_color);
+            draw_disc(pos, size * 0.5f, thickness, body);
             for (int i = 0; i < m->appendages; ++i) {
                 float angle = (PI_F * 2.0f / (float)m->appendages) * (float)i;
                 float length = size * (1.0f + 0.25f * sinf(t * 2.2f + angle));
                 Vector3 tip = {pos.x + cosf(angle) * length, pos.y, pos.z + sinf(angle) * length};
-                DrawCylinderEx(pos, tip, size * 0.08f, size * 0.02f, 6, base_color);
+                DrawCylinderEx(pos, tip, size * 0.08f, size * 0.02f, 6, body);
             }
         } break;
         case FORM_CLUSTER: {
-            draw_disc(pos, size * 0.38f, thickness, base_color);
+            draw_disc(pos, size * 0.38f, thickness, body);
             for (int i = 0; i < 5; ++i) {
                 float angle = (PI_F * 2.0f / 5.0f) * (float)i + m->phase;
                 Vector3 p = {pos.x + cosf(angle) * size * 0.55f, pos.y, pos.z + sinf(angle) * size * 0.55f};
-                draw_disc(p, size * 0.28f, thickness, base_color);
+                draw_disc(p, size * 0.28f, thickness, body);
             }
         } break;
         case FORM_DIATOM: {
             Vector3 top = {pos.x, pos.y + size * 0.08f, pos.z};
             Vector3 bot = {pos.x, pos.y - size * 0.08f, pos.z};
-            DrawCylinderEx(top, bot, size * 0.9f, size * 0.8f, 20, base_color);
+            DrawCylinderEx(top, bot, size * 0.9f, size * 0.8f, 20, body);
             for (int i = 0; i < 8; ++i) {
                 float angle = (PI_F * 2.0f / 8.0f) * (float)i + m->phase;
                 Vector3 rim = {pos.x + cosf(angle) * size * 0.8f, pos.y, pos.z + sinf(angle) * size * 0.8f};
@@ -824,12 +826,12 @@ static void draw_microbe_form(const Microbe *m, Color base_color, float t, int d
             if (detail > 0) draw_outline(pos, size * 0.9f, (Color){180, 170, 120, 220});
         } break;
         case FORM_AMOEBA: {
-            draw_disc(pos, size * 0.55f, thickness, base_color);
+            draw_disc(pos, size * 0.55f, thickness, body);
             for (int i = 0; i < 6; ++i) {
                 float angle = (PI_F * 2.0f / 6.0f) * (float)i + m->phase;
                 float stretch = 0.8f + 0.35f * sinf(t * 1.2f + angle);
                 Vector3 blob = {pos.x + cosf(angle) * size * 0.6f, pos.y, pos.z + sinf(angle) * size * 0.6f};
-                draw_disc(blob, size * 0.3f * stretch, thickness, base_color);
+                draw_disc(blob, size * 0.3f * stretch, thickness, body);
             }
             if (detail > 0) {
                 Vector3 nucleus = {pos.x + size * 0.2f, pos.y, pos.z - size * 0.15f};
@@ -838,9 +840,9 @@ static void draw_microbe_form(const Microbe *m, Color base_color, float t, int d
         } break;
         case FORM_FLAGELLATE: {
             Vector3 head = {pos.x + size * 0.25f, pos.y, pos.z};
-            draw_disc(head, size * 0.55f, thickness, base_color);
+            draw_disc(head, size * 0.55f, thickness, body);
             Vector3 tail = {pos.x - size * 0.65f, pos.y, pos.z};
-            draw_disc(tail, size * 0.32f, thickness, base_color);
+            draw_disc(tail, size * 0.32f, thickness, body);
             Vector3 prev = {pos.x - size * 0.7f, pos.y, pos.z};
             for (int i = 1; i <= 6; ++i) {
                 float step = (float)i / 6.0f;
@@ -857,21 +859,19 @@ static void draw_microbe_form(const Microbe *m, Color base_color, float t, int d
             }
         } break;
         default:
-            draw_disc(pos, size, thickness, base_color);
+            draw_disc(pos, size, thickness, body);
             break;
     }
 
-    if (detail > 0) {
-        if (detail >= 2) {
-            draw_internal_granules(m, t, detail, photosynth);
-        }
+    if (detail >= 2) {
+        draw_internal_granules(m, t, detail, photosynth);
     }
 }
 
 static void draw_microbe_traits(const Microbe *m, float t) {
     if (m->traits & (1u << TRAIT_CAPSULE)) {
         float pulse = 0.08f * sinf(t * 1.6f + m->pulse);
-        DrawSphere(m->pos, m->size * (1.2f + pulse), (Color){120, 190, 255, 50});
+        draw_outline(m->pos, m->size * (1.2f + pulse), (Color){120, 190, 255, 120});
     }
     if (m->traits & (1u << TRAIT_FLAGELLA)) {
         int segments = 6;
@@ -900,12 +900,12 @@ static void draw_microbe_traits(const Microbe *m, float t) {
     }
     if (m->traits & (1u << TRAIT_ENDOSPORE)) {
         float shell = 0.4f + 0.05f * sinf(t * 2.0f + m->pulse);
-        DrawSphere(m->pos, m->size * shell, (Color){220, 220, 240, 220});
-        DrawSphere(m->pos, m->size * 0.7f, (Color){180, 190, 210, 40});
+        DrawSphere(m->pos, m->size * shell, (Color){220, 220, 240, 160});
+        draw_outline(m->pos, m->size * 0.7f, (Color){180, 190, 210, 120});
     }
     if (m->traits & (1u << TRAIT_LPS)) {
         float haze = 0.2f + 0.05f * sinf(t * 1.3f + m->phase);
-        DrawSphere(m->pos, m->size * (1.35f + haze), (Color){255, 170, 90, 35});
+        draw_outline(m->pos, m->size * (1.35f + haze), (Color){255, 170, 90, 110});
         for (int i = 0; i < 4; ++i) {
             float angle = (PI_F * 2.0f / 4.0f) * (float)i + m->phase;
             Vector3 tip = {m->pos.x + cosf(angle) * m->size * 1.8f, m->pos.y, m->pos.z + sinf(angle) * m->size * 1.8f};
@@ -918,7 +918,7 @@ static void draw_microbe_traits(const Microbe *m, float t) {
     }
     if (m->traits & (1u << TRAIT_QUORUM)) {
         float pulse = 0.4f + 0.2f * sinf(t * 3.0f);
-        DrawSphere(m->pos, m->size * (1.1f + pulse), (Color){180, 140, 255, 40});
+        draw_outline(m->pos, m->size * (1.1f + pulse), (Color){180, 140, 255, 120});
     }
 }
 
@@ -938,14 +938,7 @@ void game_render(const GameState *game, Camera3D camera, float alpha) {
         DrawSphere((Vector3){px, py, pz}, 0.08f, (Color){60, 90, 120, 120});
     }
 
-    int detail = game->high_quality ? 2 : 0;
-    if (game->high_quality) {
-        if (game->microbe_count > 2000) {
-            detail = 0;
-        } else if (game->microbe_count > 600) {
-            detail = 1;
-        }
-    }
+    int detail = 0;
 
     BeginBlendMode(BLEND_ALPHA);
     for (int i = 0; i < game->microbe_count; ++i) {
@@ -1079,17 +1072,6 @@ void game_render_ui(GameState *game, int screen_w, int screen_h) {
     }
     y += 26;
 
-    Rectangle quality = { (float)x, (float)y, 280.0f, 20.0f };
-    DrawRectangleRec(quality, (Color){20, 20, 30, 200});
-    DrawText(TextFormat("Visual Detail: %s (H)", game->high_quality ? "HIGH" : "LOW"), x + 6, y + 3, 12, GRAY);
-    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-        Vector2 mp = GetMousePosition();
-        if (CheckCollisionPointRec(mp, quality)) {
-            game->high_quality = !game->high_quality;
-        }
-    }
-    y += 26;
-
     for (int i = 0; i < RES_COUNT; ++i) {
         Resource *res = &game->resources[i];
         if (!res->unlocked) {
@@ -1159,9 +1141,6 @@ void game_handle_input(GameState *game, Camera3D camera, float dt, int screen_w,
     Rectangle panel = { (float)(pad - 8), (float)(pad - 8), 320.0f, (float)(screen_h - pad * 2) };
     if (IsKeyPressed(KEY_B)) {
         game->show_bounds = !game->show_bounds;
-    }
-    if (IsKeyPressed(KEY_H)) {
-        game->high_quality = !game->high_quality;
     }
     Vector2 mp = GetMousePosition();
     if (CheckCollisionPointRec(mp, panel)) {
