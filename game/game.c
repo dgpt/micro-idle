@@ -743,30 +743,57 @@ static void draw_outline(Vector3 pos, float radius, Color color) {
     DrawCircle3D(pos, radius, (Vector3){0.0f, 0.0f, 1.0f}, 90.0f, color);
 }
 
+static void draw_capsule_body(Vector3 start, Vector3 end, float radius, Color color) {
+    DrawCapsule(start, end, radius, 12, 6, color);
+}
+
+static void draw_dna_strand(const Microbe *m, float t) {
+    int points = 12;
+    float length = m->size * 0.55f;
+    float pitch = m->size * 0.12f;
+    float phase = t * 1.2f + m->phase;
+    Color strand = (Color){200, 220, 255, 180};
+    for (int i = 0; i < points - 1; ++i) {
+        float step = (float)i / (float)(points - 1);
+        float offset = (step - 0.5f) * length;
+        float wave = sinf(phase + step * PI_F * 2.0f) * m->size * 0.1f;
+        Vector3 a = {m->pos.x + wave, m->pos.y, m->pos.z + offset};
+        Vector3 b = {m->pos.x + sinf(phase + (step + 1.0f / (points - 1)) * PI_F * 2.0f) * m->size * 0.14f,
+                     m->pos.y, m->pos.z + offset + length / (points - 1)};
+        DrawLine3D(a, b, strand);
+        DrawSphere(a, m->size * 0.05f, strand);
+        if ((i % 2) == 0) {
+            Vector3 rung = {m->pos.x - wave, m->pos.y, m->pos.z + offset + pitch};
+            DrawLine3D(a, rung, (Color){180, 200, 230, 120});
+        }
+    }
+}
+
 static void draw_microbe_form(const Microbe *m, Color base_color, float t, int detail) {
     Vector3 pos = m->pos;
     float size = m->size;
     bool photosynth = (m->traits & (1u << TRAIT_PHOTOSYNTH)) != 0u;
     float squish = clampf(m->squish, 0.0f, 1.2f);
     float thickness = size * (0.16f + squish * 0.16f);
-    Color body = (Color){base_color.r, base_color.g, base_color.b, 150};
-    Color inner = (Color){base_color.r, base_color.g, base_color.b, 90};
+    Color body = (Color){base_color.r, base_color.g, base_color.b, 90};
     Color edge = (Color){(unsigned char)(base_color.r * 0.6f),
                          (unsigned char)(base_color.g * 0.6f),
                          (unsigned char)(base_color.b * 0.6f), 200};
 
+    if (detail >= 1) {
+        (void)photosynth;
+        draw_dna_strand(m, t);
+    }
+
     switch (m->form) {
         case FORM_COCCUS:
             draw_disc(pos, size, thickness, body);
-            draw_disc(pos, size * 0.75f, thickness * 0.8f, inner);
             if (detail > 0) draw_outline(pos, size * 1.01f, edge);
             break;
         case FORM_BACILLUS: {
             Vector3 start = {pos.x - size * 0.9f, pos.y, pos.z};
             Vector3 end = {pos.x + size * 0.9f, pos.y, pos.z};
-            DrawCylinderEx(start, end, size * 0.45f, size * 0.45f, 12, body);
-            draw_disc(start, size * 0.45f, thickness, body);
-            draw_disc(end, size * 0.45f, thickness, body);
+            draw_capsule_body(start, end, size * 0.45f, body);
             if (detail > 0) {
                 draw_outline(start, size * 0.48f, edge);
                 draw_outline(end, size * 0.48f, edge);
@@ -775,26 +802,34 @@ static void draw_microbe_form(const Microbe *m, Color base_color, float t, int d
         case FORM_VIBRIO: {
             Vector3 start = {pos.x - size * 0.7f, pos.y, pos.z - size * 0.3f};
             Vector3 end = {pos.x + size * 0.7f, pos.y, pos.z + size * 0.3f};
-            DrawCylinderEx(start, end, size * 0.45f, size * 0.45f, 12, body);
-            draw_disc(start, size * 0.45f, thickness, body);
-            draw_disc(end, size * 0.45f, thickness, body);
+            draw_capsule_body(start, end, size * 0.42f, body);
             if (detail > 0) {
                 draw_outline(start, size * 0.48f, edge);
                 draw_outline(end, size * 0.48f, edge);
             }
         } break;
         case FORM_SPIRILLUM: {
-            for (int i = -2; i <= 2; ++i) {
-                Vector3 p = {pos.x + i * size * 0.35f, pos.y, pos.z + sinf((float)i) * size * 0.25f};
-                draw_disc(p, size * 0.28f, thickness, body);
+            Vector3 start = {pos.x - size * 0.9f, pos.y, pos.z};
+            Vector3 end = {pos.x + size * 0.9f, pos.y, pos.z};
+            draw_capsule_body(start, end, size * 0.38f, body);
+            for (int i = 0; i < 6; ++i) {
+                float step = (float)i / 5.0f;
+                float wave = sinf(t * 2.0f + m->phase + step * PI_F * 2.0f) * size * 0.25f;
+                Vector3 a = {pos.x - size * 0.9f + step * size * 1.8f, pos.y, pos.z + wave};
+                Vector3 b = {a.x + size * 0.15f, a.y, a.z + wave * 0.25f};
+                DrawLine3D(a, b, edge);
             }
         } break;
         case FORM_FILAMENT: {
-            for (int i = 0; i < 7; ++i) {
-                float step = (float)i - 3.0f;
-                float bend = sinf(t * 1.5f + m->phase + step * 0.8f) * size * 0.25f;
-                Vector3 p = {pos.x + step * size * 0.45f, pos.y, pos.z + bend};
-                draw_disc(p, size * 0.22f, thickness, body);
+            Vector3 start = {pos.x - size * 1.2f, pos.y, pos.z};
+            Vector3 end = {pos.x + size * 1.2f, pos.y, pos.z};
+            draw_capsule_body(start, end, size * 0.28f, body);
+            for (int i = 0; i < 5; ++i) {
+                float step = (float)i / 4.0f;
+                float wave = sinf(t * 1.6f + m->phase + step * PI_F * 2.0f) * size * 0.22f;
+                Vector3 a = {pos.x - size * 1.2f + step * size * 2.4f, pos.y, pos.z + wave};
+                Vector3 b = {a.x + size * 0.18f, a.y, a.z + wave * 0.2f};
+                DrawLine3D(a, b, edge);
             }
         } break;
         case FORM_STELLATE: {
@@ -807,17 +842,15 @@ static void draw_microbe_form(const Microbe *m, Color base_color, float t, int d
             }
         } break;
         case FORM_CLUSTER: {
-            draw_disc(pos, size * 0.38f, thickness, body);
-            for (int i = 0; i < 5; ++i) {
-                float angle = (PI_F * 2.0f / 5.0f) * (float)i + m->phase;
-                Vector3 p = {pos.x + cosf(angle) * size * 0.55f, pos.y, pos.z + sinf(angle) * size * 0.55f};
-                draw_disc(p, size * 0.28f, thickness, body);
+            draw_disc(pos, size * 0.55f, thickness, body);
+            for (int i = 0; i < 4; ++i) {
+                float angle = (PI_F * 2.0f / 4.0f) * (float)i + m->phase;
+                Vector3 p = {pos.x + cosf(angle) * size * 0.4f, pos.y, pos.z + sinf(angle) * size * 0.4f};
+                DrawLine3D(pos, p, edge);
             }
         } break;
         case FORM_DIATOM: {
-            Vector3 top = {pos.x, pos.y + size * 0.08f, pos.z};
-            Vector3 bot = {pos.x, pos.y - size * 0.08f, pos.z};
-            DrawCylinderEx(top, bot, size * 0.9f, size * 0.8f, 20, body);
+            draw_disc(pos, size * 0.9f, thickness * 0.6f, body);
             for (int i = 0; i < 8; ++i) {
                 float angle = (PI_F * 2.0f / 8.0f) * (float)i + m->phase;
                 Vector3 rim = {pos.x + cosf(angle) * size * 0.8f, pos.y, pos.z + sinf(angle) * size * 0.8f};
@@ -826,23 +859,19 @@ static void draw_microbe_form(const Microbe *m, Color base_color, float t, int d
             if (detail > 0) draw_outline(pos, size * 0.9f, (Color){180, 170, 120, 220});
         } break;
         case FORM_AMOEBA: {
-            draw_disc(pos, size * 0.55f, thickness, body);
+            draw_disc(pos, size * 0.6f, thickness, body);
             for (int i = 0; i < 6; ++i) {
                 float angle = (PI_F * 2.0f / 6.0f) * (float)i + m->phase;
-                float stretch = 0.8f + 0.35f * sinf(t * 1.2f + angle);
-                Vector3 blob = {pos.x + cosf(angle) * size * 0.6f, pos.y, pos.z + sinf(angle) * size * 0.6f};
-                draw_disc(blob, size * 0.3f * stretch, thickness, body);
-            }
-            if (detail > 0) {
-                Vector3 nucleus = {pos.x + size * 0.2f, pos.y, pos.z - size * 0.15f};
-                draw_disc(nucleus, size * 0.16f, thickness * 0.6f, (Color){120, 140, 180, 160});
+                float stretch = 0.6f + 0.3f * sinf(t * 1.1f + angle);
+                Vector3 spike = {pos.x + cosf(angle) * size * 0.6f, pos.y, pos.z + sinf(angle) * size * 0.6f};
+                Vector3 tip = {pos.x + cosf(angle) * size * (0.75f + stretch * 0.2f), pos.y, pos.z + sinf(angle) * size * (0.75f + stretch * 0.2f)};
+                DrawLine3D(spike, tip, edge);
             }
         } break;
         case FORM_FLAGELLATE: {
             Vector3 head = {pos.x + size * 0.25f, pos.y, pos.z};
-            draw_disc(head, size * 0.55f, thickness, body);
             Vector3 tail = {pos.x - size * 0.65f, pos.y, pos.z};
-            draw_disc(tail, size * 0.32f, thickness, body);
+            draw_capsule_body(tail, head, size * 0.42f, body);
             Vector3 prev = {pos.x - size * 0.7f, pos.y, pos.z};
             for (int i = 1; i <= 6; ++i) {
                 float step = (float)i / 6.0f;
@@ -863,9 +892,7 @@ static void draw_microbe_form(const Microbe *m, Color base_color, float t, int d
             break;
     }
 
-    if (detail >= 2) {
-        draw_internal_granules(m, t, detail, photosynth);
-    }
+    (void)photosynth;
 }
 
 static void draw_microbe_traits(const Microbe *m, float t) {
@@ -938,7 +965,7 @@ void game_render(const GameState *game, Camera3D camera, float alpha) {
         DrawSphere((Vector3){px, py, pz}, 0.08f, (Color){60, 90, 120, 120});
     }
 
-    int detail = 0;
+    int detail = (game->microbe_count > 300) ? 0 : 1;
 
     BeginBlendMode(BLEND_ALPHA);
     for (int i = 0; i < game->microbe_count; ++i) {
