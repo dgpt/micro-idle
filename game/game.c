@@ -9,6 +9,11 @@
 #include "engine/util/rng.h"
 
 #define PI_F 3.14159265358979323846f
+#define GRID_W 16
+#define GRID_H 12
+#define GRID_CELL 2.0f
+#define GRID_ORIGIN_X -14.0f
+#define GRID_ORIGIN_Z -12.0f
 
 typedef enum BaseForm {
     FORM_COCCUS = 0,
@@ -84,6 +89,7 @@ typedef struct Microbe {
     float drift;
     float twist;
     int appendages;
+    float squish;
     float dormant_timer;
     bool dormant;
 } Microbe;
@@ -101,6 +107,8 @@ struct GameState {
     Microbe microbes[MAX_MICROBES];
     int microbe_count;
     Zone zones[MAX_ZONES];
+    int grid_head[GRID_W * GRID_H];
+    int grid_next[MAX_MICROBES];
 
     Resource resources[RES_COUNT];
     TraitDef traits[TRAIT_COUNT];
@@ -166,6 +174,97 @@ static float vec3_dist_sq(Vector3 a, Vector3 b) {
     float dy = a.y - b.y;
     float dz = a.z - b.z;
     return dx * dx + dy * dy + dz * dz;
+}
+
+static float vec3_dot(Vector3 a, Vector3 b) {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+static void grid_coords(Vector3 pos, int *out_x, int *out_z) {
+    int gx = (int)((pos.x - GRID_ORIGIN_X) / GRID_CELL);
+    int gz = (int)((pos.z - GRID_ORIGIN_Z) / GRID_CELL);
+    if (gx < 0) gx = 0;
+    if (gz < 0) gz = 0;
+    if (gx >= GRID_W) gx = GRID_W - 1;
+    if (gz >= GRID_H) gz = GRID_H - 1;
+    *out_x = gx;
+    *out_z = gz;
+}
+
+static void build_spatial_grid(GameState *game) {
+    int cells = GRID_W * GRID_H;
+    for (int i = 0; i < cells; ++i) {
+        game->grid_head[i] = -1;
+    }
+    for (int i = 0; i < game->microbe_count; ++i) {
+        int cx = 0;
+        int cz = 0;
+        grid_coords(game->microbes[i].pos, &cx, &cz);
+        int idx = cz * GRID_W + cx;
+        game->grid_next[i] = game->grid_head[idx];
+        game->grid_head[idx] = i;
+    }
+}
+
+static void resolve_collisions(GameState *game, float dt) {
+    build_spatial_grid(game);
+    for (int i = 0; i < game->microbe_count; ++i) {
+        Microbe *a = &game->microbes[i];
+        int cx = 0;
+        int cz = 0;
+        grid_coords(a->pos, &cx, &cz);
+
+        for (int dz = -1; dz <= 1; ++dz) {
+            int nz = cz + dz;
+            if (nz < 0 || nz >= GRID_H) continue;
+            for (int dx = -1; dx <= 1; ++dx) {
+                int nx = cx + dx;
+                if (nx < 0 || nx >= GRID_W) continue;
+                int head = game->grid_head[nz * GRID_W + nx];
+                for (int j = head; j != -1; j = game->grid_next[j]) {
+                    if (j <= i) continue;
+                    Microbe *b = &game->microbes[j];
+                    float radius = (a->size + b->size) * 0.9f;
+                    float d2 = vec3_dist_sq(a->pos, b->pos);
+                    if (d2 >= radius * radius) {
+                        continue;
+                    }
+                    float dist = sqrtf(fmaxf(d2, 0.0001f));
+                    Vector3 n = { (b->pos.x - a->pos.x) / dist, 0.0f, (b->pos.z - a->pos.z) / dist };
+                    float overlap = radius - dist;
+                    float inv_mass_a = 1.0f / fmaxf(a->size, 0.2f);
+                    float inv_mass_b = 1.0f / fmaxf(b->size, 0.2f);
+                    float total_inv = inv_mass_a + inv_mass_b;
+                    float correction = overlap / total_inv;
+                    a->pos.x -= n.x * correction * inv_mass_a;
+                    a->pos.z -= n.z * correction * inv_mass_a;
+                    b->pos.x += n.x * correction * inv_mass_b;
+                    b->pos.z += n.z * correction * inv_mass_b;
+
+                    Vector3 rel = { b->vel.x - a->vel.x, 0.0f, b->vel.z - a->vel.z };
+                    float rel_norm = vec3_dot(rel, n);
+                    if (rel_norm < 0.0f) {
+                        float restitution = 0.6f;
+                        float impulse = -(1.0f + restitution) * rel_norm / total_inv;
+                        a->vel.x -= n.x * impulse * inv_mass_a;
+                        a->vel.z -= n.z * impulse * inv_mass_a;
+                        b->vel.x += n.x * impulse * inv_mass_b;
+                        b->vel.z += n.z * impulse * inv_mass_b;
+                    }
+
+                    float softness = overlap * 4.0f;
+                    a->vel.x -= n.x * softness * dt * inv_mass_a;
+                    a->vel.z -= n.z * softness * dt * inv_mass_a;
+                    b->vel.x += n.x * softness * dt * inv_mass_b;
+                    b->vel.z += n.z * softness * dt * inv_mass_b;
+
+                    float squish = overlap / fmaxf(radius, 0.001f);
+                    if (squish > a->squish) a->squish = squish;
+                    if (squish > b->squish) b->squish = squish;
+                }
+            }
+        }
+    }
 }
 
 static void init_resources(GameState *game) {
@@ -520,6 +619,10 @@ void game_update_fixed(GameState *game, float dt) {
         m->wobble += dt * (1.2f + 0.4f * m->twist);
         m->phase += dt * (0.8f + 0.6f * m->drift);
         m->pulse += dt * (1.4f + 0.3f * m->twist);
+        m->squish -= dt * 2.5f;
+        if (m->squish < 0.0f) {
+            m->squish = 0.0f;
+        }
 
         if (m->dormant) {
             m->dormant_timer -= dt;
@@ -586,6 +689,8 @@ void game_update_fixed(GameState *game, float dt) {
         }
     }
 
+    resolve_collisions(game, dt);
+
     if (game->resources[RES_OXYGEN].unlocked && photosynth_count > 0) {
         float burn = 0.4f + 0.1f * (float)game->upgrade_level[RES_OXYGEN];
         resource_gain(game, RES_OXYGEN, dt * 0.25f * (float)photosynth_count);
@@ -643,7 +748,8 @@ static void draw_microbe_form(const Microbe *m, Color base_color, float t, int d
     Vector3 pos = m->pos;
     float size = m->size;
     bool photosynth = (m->traits & (1u << TRAIT_PHOTOSYNTH)) != 0u;
-    float thickness = size * 0.18f;
+    float squish = clampf(m->squish, 0.0f, 0.8f);
+    float thickness = size * (0.18f + squish * 0.08f);
     Color edge = (Color){(unsigned char)(base_color.r * 0.6f),
                          (unsigned char)(base_color.g * 0.6f),
                          (unsigned char)(base_color.b * 0.6f), 220};
