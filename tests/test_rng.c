@@ -31,5 +31,29 @@ int test_rng_run(void) {
         }
     }
 
+    rng_seed(&a, 0u);
+    if (a.state == 0u) {
+        printf("rng seed zero did not set default state\n");
+        fails++;
+    }
+
+    float f01 = rng_next_f01(&a);
+    if (f01 < 0.0f || f01 >= 1.0f) {
+        printf("rng f01 out of range %.4f\n", f01);
+        fails++;
+    }
+
+    float fr = rng_range(&a, -2.0f, 2.0f);
+    if (fr < -2.0f || fr > 2.0f) {
+        printf("rng range out of bounds %.4f\n", fr);
+        fails++;
+    }
+
+    int same = rng_range_i(&a, 5, 4);
+    if (same != 5) {
+        printf("rng range_i expected min on inverted bounds\n");
+        fails++;
+    }
+
     return fails;
 }

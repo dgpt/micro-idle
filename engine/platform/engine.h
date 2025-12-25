@@ -2,7 +2,7 @@
 #define MICRO_IDLE_ENGINE_H
 
 #include <stdbool.h>
-#include "engine/time.h"
+#include "engine/platform/time.h"
 
 typedef struct EngineConfig {
     int window_w;

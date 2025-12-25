@@ -1,0 +1,25 @@
+        -:    0:Source:/home/dgpt/code/games/micro-idle/engine/platform/engine.c
+        -:    0:Graph:build/CMakeFiles/tests.dir/engine/platform/engine.c.gcno
+        -:    0:Data:build/CMakeFiles/tests.dir/engine/platform/engine.c.gcda
+        -:    0:Runs:15
+        -:    1:#include "engine/platform/engine.h"
+        -:    2:#include "engine/platform/time.h"
+        -:    3:
+function engine_init called 15 returned 100% blocks executed 100%
+       15:    4:void engine_init(EngineContext *ctx, EngineConfig cfg) {
+       15:    5:    ctx->cfg = cfg;
+       15:    6:    time_init(&ctx->time, cfg.tick_hz);
+call    0 returned 15
+       15:    7:}
+        -:    8:
+function engine_time_update called 15 returned 100% blocks executed 100%
+       15:    9:int engine_time_update(EngineContext *ctx, double real_dt) {
+       15:   10:    return time_update(&ctx->time, real_dt);
+call    0 returned 15
+        -:   11:}
+        -:   12:
+function engine_time_alpha called 15 returned 100% blocks executed 100%
+       15:   13:float engine_time_alpha(const EngineContext *ctx) {
+       15:   14:    return time_alpha(&ctx->time);
+call    0 returned 15
+        -:   15:}

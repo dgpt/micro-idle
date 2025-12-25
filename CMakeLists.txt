@@ -7,8 +7,12 @@ option(DETERMINISM "Enable deterministic simulation" OFF)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-find_package(raylib QUIET)
-if (NOT raylib_FOUND)
+set(GRAPHICS GRAPHICS_API_OPENGL_46 CACHE STRING "" FORCE)
+option(USE_SYSTEM_RAYLIB "Use system-installed raylib" OFF)
+
+if (USE_SYSTEM_RAYLIB)
+    find_package(raylib REQUIRED)
+else()
     if (EXISTS "${CMAKE_CURRENT_LIST_DIR}/third_party/raylib/CMakeLists.txt")
         add_subdirectory(third_party/raylib)
     else()
@@ -22,11 +26,12 @@ if (NOT raylib_FOUND)
 endif()
 
 add_executable(game
-    apps/game/main.c
-    engine/engine.c
-    engine/time.c
+    bin/main.c
+    engine/platform/engine.c
+    engine/platform/time.c
     engine/util/rng.c
     game/game.c
+    game/gpu_sim.c
 )
 
 target_include_directories(game PRIVATE ${CMAKE_CURRENT_LIST_DIR})
@@ -35,18 +40,29 @@ target_link_libraries(game PRIVATE raylib)
 target_compile_definitions(game PRIVATE
     $<$<BOOL:${DEV}>:DEV_MODE>
     $<$<BOOL:${DETERMINISM}>:DETERMINISM_MODE>
+    GRAPHICS_API_OPENGL_46
 )
 
 add_executable(tests
-    apps/tests/test_main.c
-    apps/tests/test_time.c
-    apps/tests/test_rng.c
-    apps/tests/test_game_constants.c
-    engine/time.c
+    tests/test_main.c
+    tests/test_time.c
+    tests/test_rng.c
+    tests/test_engine.c
+    tests/test_game_constants.c
+    tests/test_gpu_sim.c
+    tests/test_game.c
+    tests/test_render_output.c
+    engine/platform/engine.c
+    engine/platform/time.c
     engine/util/rng.c
+    game/game.c
+    game/gpu_sim.c
 )
 target_include_directories(tests PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 target_link_libraries(tests PRIVATE raylib)
+target_compile_definitions(tests PRIVATE GPU_SIM_TESTING)
+target_compile_options(tests PRIVATE --coverage -O0)
+target_link_options(tests PRIVATE --coverage)
 
 if (UNIX AND NOT APPLE)
     target_link_libraries(game PRIVATE m)

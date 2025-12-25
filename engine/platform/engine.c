@@ -1,5 +1,5 @@
-#include "engine/engine.h"
-#include "engine/time.h"
+#include "engine/platform/engine.h"
+#include "engine/platform/time.h"
 
 void engine_init(EngineContext *ctx, EngineConfig cfg) {
     ctx->cfg = cfg;

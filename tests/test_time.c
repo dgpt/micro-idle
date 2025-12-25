@@ -1,4 +1,4 @@
-#include "engine/time.h"
+#include "engine/platform/time.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -35,6 +35,21 @@ int test_time_run(void) {
         fails++;
     }
     fails += expect_close("alpha", time_alpha(&state), 0.5f, 0.05f);
+
+    steps = time_update(&state, -1.0);
+    if (steps != 0 || state.real_dt != 0.0) {
+        printf("time negative dt not clamped\n");
+        fails++;
+    }
+
+    steps = time_update(&state, state.tick_dt * 20.0);
+    if (steps != 9) {
+        printf("time expected max step clamp got %d\n", steps);
+        fails++;
+    }
+
+    state.tick_dt = 0.0;
+    fails += expect_close("alpha_zero_dt", time_alpha(&state), 0.0f, 0.0001f);
 
     return fails;
 }
