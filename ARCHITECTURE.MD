@@ -93,10 +93,49 @@ typedef struct EngineContext {
 
 The **only** simulation path is GPU-based. CPU work is limited to input, high-level orchestration, and UI.
 
-- **Entity state** lives in SSBOs (position, velocity, size, type).
-- **Compute shaders** update movement and collisions.
-- **Spatial grid** (head + next buffers) is built on GPU for broad-phase.
-- **Render** uses instanced drawing with SSBO-backed attributes.
+### Physics Architecture: XPBD (Extended Position Based Dynamics)
+
+We use **XPBD** for soft-body physics, based on the [Macklin et al. paper](http://mmacklin.com/xpbd.pdf). This provides:
+- Stable, iteration-independent stiffness via compliance parameters
+- Natural soft-body deformation through constraint solving
+- GPU-parallelizable constraint projection
+
+### Two-Layer Simulation Model
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  PHYSICS LAYER (Low-res particle clusters)                  │
+│  - Each microbe = 8-16 particles in a ring/blob             │
+│  - Distance constraints maintain shape                       │
+│  - Collisions between microbes via particle proximity        │
+│  - XPBD solver runs on GPU compute shaders                  │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼ (particle positions drive deformation)
+┌─────────────────────────────────────────────────────────────┐
+│  RENDER LAYER (High-res visual mesh)                        │
+│  - Smooth visual hull generated from particle positions     │
+│  - Vertex shader interpolates between particle positions    │
+│  - Fragment shader adds biological detail (membrane, etc.)  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### XPBD Algorithm (per frame)
+
+1. **Predict**: Apply external forces, predict new positions
+2. **Build spatial grid**: For broad-phase collision detection
+3. **Generate collision constraints**: Between nearby particles of different microbes
+4. **Solve constraints** (N iterations):
+   - For each constraint: compute Δλ = -(C + α̃λ) / (Σw|∇C|² + α̃)
+   - Apply position correction: x += w·Δλ·∇C
+5. **Update velocities**: v = (x - x_prev) / dt
+
+### Data Layout (SSBOs)
+
+- **Particles**: position, velocity, inverse mass, microbe ID
+- **Constraints**: particle indices, rest length, compliance, λ accumulator
+- **Microbes**: center of mass, rotation, type, visual parameters
+- **Spatial Grid**: head + next buffers for broad-phase
 
 The CPU never iterates over all entities per-frame.
 

@@ -1,0 +1,160 @@
+#version 450
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+struct Entity { vec4 pos; vec4 vel; vec4 color; vec4 params; };
+
+layout(std430, binding = 0) buffer Entities { Entity entities[]; };
+layout(std430, binding = 1) buffer GridHead { int head[]; };
+layout(std430, binding = 2) buffer GridNext { int next[]; };
+
+layout(push_constant) uniform PushConstants {
+    float dt;
+    float bounds_x;
+    float bounds_y;
+    float cell;
+    int grid_w;
+    int grid_h;
+    int active_count;
+    float time;
+} pc;
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= uint(pc.active_count) || idx >= entities.length()) return;
+
+    vec3 p = entities[idx].pos.xyz;
+    vec3 v = entities[idx].vel.xyz;
+    float radius = entities[idx].params.x;
+    float type = floor(entities[idx].params.z + 0.5);
+    float seed = entities[idx].params.w;
+
+    int gx = int((p.x + pc.bounds_x) / pc.cell);
+    int gz = int((p.z + pc.bounds_y) / pc.cell);
+    gx = clamp(gx, 0, pc.grid_w - 1);
+    gz = clamp(gz, 0, pc.grid_h - 1);
+
+    vec3 push = vec3(0.0);
+    float squish = entities[idx].params.y;
+
+    for (int dz = -1; dz <= 1; ++dz) {
+        int nz = gz + dz;
+        if (nz < 0 || nz >= pc.grid_h) continue;
+        for (int dx = -1; dx <= 1; ++dx) {
+            int nx = gx + dx;
+            if (nx < 0 || nx >= pc.grid_w) continue;
+            int cell_idx = nz * pc.grid_w + nx;
+            for (int j = head[cell_idx]; j != -1; j = next[j]) {
+                if (j == int(idx)) continue;
+                vec3 op = entities[j].pos.xyz;
+                float orad = entities[j].params.x;
+                vec3 d = p - op;
+                float dist2 = dot(d, d);
+                float r = radius + orad;
+                if (dist2 < r * r && dist2 > 0.00001) {
+                    float dist = sqrt(dist2);
+                    vec3 n = d / dist;
+                    float overlap = r - dist;
+                    // Soft collision with elastic bounce
+                    float pushStrength = overlap * 1.2;
+                    push += n * pushStrength;
+                    // Accumulate squish based on penetration depth
+                    float penetration = overlap / r;
+                    squish = max(squish, penetration * 1.5);
+                }
+            }
+        }
+    }
+
+    // Self-propulsion: microbes swim in their facing direction
+    float speed = length(v.xz);
+    // Use seed for random initial facing when velocity is low
+    vec2 seedDir = vec2(cos(seed * 6.283), sin(seed * 6.283));
+    vec2 facing = speed > 0.05 ? normalize(v.xz) : seedDir;
+
+    // Base swim speed varies by type
+    float swimSpeed = 0.0;
+    float turnRate = 0.0;
+
+    if (type < 0.5) {
+        // Coccus: slow, random tumbling motion
+        swimSpeed = 1.5;
+        turnRate = 3.0;
+    } else if (type < 1.5) {
+        // Bacillus: faster, more directed swimming with flagella
+        swimSpeed = 3.5;
+        turnRate = 1.2;
+    } else if (type < 2.5) {
+        // Vibrio: curved swimming path
+        swimSpeed = 2.5;
+        turnRate = 2.0;
+    } else {
+        // Spirillum: corkscrew motion, moderate speed
+        swimSpeed = 2.0;
+        turnRate = 1.5;
+    }
+
+    // Add propulsion force in facing direction
+    float phase = pc.time * (1.0 + seed * 0.5) + seed * 6.28;
+    float thrust = swimSpeed * (0.7 + 0.3 * sin(phase * 3.0));
+
+    // Random direction changes (tumbling behavior)
+    float turnPhase = pc.time * turnRate + seed * 12.56;
+    float turnAmount = sin(turnPhase) * 0.15 + sin(turnPhase * 2.3) * 0.08;
+    vec2 perpendicular = vec2(-facing.y, facing.x);
+    vec2 swimDir = normalize(facing + perpendicular * turnAmount);
+
+    // Apply propulsion
+    vec3 propulsion = vec3(swimDir.x, 0.0, swimDir.y) * thrust * pc.dt * 2.0;
+    v += propulsion;
+
+    // Apply collision push with squish-based elasticity
+    float elasticity = 1.0 + squish * 2.0;
+    v += push * elasticity * pc.dt * 60.0;
+
+    // Drag/friction - time-dependent exponential decay
+    float baseDragRate = 3.0;  // velocity decays by ~95% per second
+    float squishDragRate = 5.0; // faster decay when squished
+    float dragRate = mix(baseDragRate, squishDragRate, squish);
+    float drag = exp(-dragRate * pc.dt);
+    v.xz *= drag;
+
+    // Velocity clamping
+    float maxSpeed = 2.5;
+    float currentSpeed = length(v.xz);
+    if (currentSpeed > maxSpeed) {
+        v.xz *= maxSpeed / currentSpeed;
+    }
+
+    // Update position
+    p += v * pc.dt;
+
+    // Boundary collision with soft bounce
+    if (p.x < -pc.bounds_x) {
+        p.x = -pc.bounds_x;
+        v.x = abs(v.x) * 0.5;
+        squish = max(squish, 0.5);
+    }
+    if (p.x > pc.bounds_x) {
+        p.x = pc.bounds_x;
+        v.x = -abs(v.x) * 0.5;
+        squish = max(squish, 0.5);
+    }
+    if (p.z < -pc.bounds_y) {
+        p.z = -pc.bounds_y;
+        v.z = abs(v.z) * 0.5;
+        squish = max(squish, 0.5);
+    }
+    if (p.z > pc.bounds_y) {
+        p.z = pc.bounds_y;
+        v.z = -abs(v.z) * 0.5;
+        squish = max(squish, 0.5);
+    }
+    p = clamp(p, vec3(-pc.bounds_x, 0.0, -pc.bounds_y), vec3(pc.bounds_x, 0.0, pc.bounds_y));
+
+    entities[idx].pos = vec4(p, 1.0);
+    entities[idx].vel = vec4(v, 0.0);
+    // Squish decay - slower decay for more visible deformation
+    float squishDecay = 2.0;
+    entities[idx].params.y = clamp(squish - pc.dt * squishDecay, 0.0, 1.5);
+}

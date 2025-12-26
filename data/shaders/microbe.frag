@@ -1,99 +1,115 @@
-#version 460 core
+#version 430 core
 
 in vec4 vColor;
 in vec2 vLocal;
 in float vType;
-in float vSeed;
 in float vSquish;
-in vec2 vDir;
+in float vSeed;
 
 uniform float u_time;
 
 out vec4 fragColor;
 
-const float TAU = 6.2831853;
+float sdf_circle(vec2 p, float r) { return length(p) - r; }
 
-float hash21(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7)) + vSeed * 13.7) * 43758.5453);
+float sdf_capsule(vec2 p, float halfLen, float radius) {
+    vec2 q = vec2(abs(p.x) - halfLen, p.y);
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
 }
 
-float sdCircle(vec2 p, float r) {
-    return length(p) - r;
+float sdf_vibrio(vec2 p) {
+    vec2 q = p;
+    q.y -= p.x * p.x * 0.35;
+    return length(q) - 0.95;
 }
 
-float sdCapsule(vec2 p, vec2 a, vec2 b, float r) {
-    vec2 pa = p - a, ba = b - a;
-    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-    return length(pa - ba * h) - r;
-}
-
-float spikeField(vec2 p, int count, float base, float amp) {
+float sdf_spiral(vec2 p, float t, float seed) {
     float ang = atan(p.y, p.x);
-    float spike = sin(ang * float(count) + vSeed * 11.7) * amp;
-    return length(p) - (base + spike);
+    float r = length(p);
+    float arm = 0.65 + 0.15 * sin(ang * 3.0 + t * 1.7 + seed * 3.0);
+    return r - arm;
 }
 
-float bandNoise(vec2 p, float freq) {
-    vec2 g = floor(p * freq);
-    float n = hash21(g);
-    return smoothstep(0.25, 0.0, length(fract(p * freq) - 0.5)) * n;
+float sdf_amoeba(vec2 p, float t, float seed) {
+    float ang = atan(p.y, p.x);
+    float r = length(p);
+    float wobble = sin(ang * 5.0 + t * 0.9 + seed * 4.0) * 0.18;
+    float wobble2 = sin(ang * 9.0 - t * 1.3 + seed * 2.7) * 0.12;
+    return r - (0.95 + wobble + wobble2);
+}
+
+float sdf_diatom(vec2 p) {
+    vec2 q = abs(p);
+    float d = max(q.x * 1.1 + q.y * 0.4, q.y * 1.4 + q.x * 0.4) - 0.95;
+    return d;
+}
+
+float shape_sdf(int type, vec2 p, float t, float seed) {
+    if (type == 0) { // Coccus
+        return sdf_circle(p, 1.0);
+    } else if (type == 1) { // Bacillus
+        return sdf_capsule(p, 0.7, 0.55);
+    } else if (type == 2) { // Vibrio
+        return sdf_vibrio(p);
+    } else if (type == 3) { // Spirillum
+        return sdf_spiral(p, t, seed);
+    } else if (type == 4) { // Amoeboid
+        return sdf_amoeba(p, t, seed);
+    } else { // Diatom / lens
+        return sdf_diatom(p);
+    }
+}
+
+vec3 shade_membrane(vec2 p, float sdf, vec3 base, float squish) {
+    float rim = smoothstep(0.0, -0.12, sdf);
+    float inner = smoothstep(-0.5, -0.1, sdf);
+    vec3 color = mix(base * 0.6, base, inner);
+    color = mix(color, base * 1.25, rim * 0.4);
+    color = mix(color, vec3(1.0), squish * rim * 0.35);
+    return color;
 }
 
 void main() {
     vec2 p = vLocal;
-    float seed = vSeed * TAU;
+    int type = int(floor(vType + 0.5));
+    float t = u_time;
 
-    float isC = 1.0 - step(0.5, abs(vType - 0.0));
-    float isB = 1.0 - step(0.5, abs(vType - 1.0));
-    float isV = 1.0 - step(0.5, abs(vType - 2.0));
-    float isS = 1.0 - step(0.5, abs(vType - 3.0));
+    float sdf = shape_sdf(type, p, t, vSeed);
+    float alpha = 1.0 - smoothstep(0.0, 0.08, sdf);
+    if (alpha < 0.01) discard;
 
-    float wobble = sin(u_time * (1.2 + vSquish) + seed * 1.3) * 0.08;
+    // Approx normal from sdf gradient
+    float eps = 0.003;
+    float dx = shape_sdf(type, p + vec2(eps, 0.0), t, vSeed) - sdf;
+    float dy = shape_sdf(type, p + vec2(0.0, eps), t, vSeed) - sdf;
+    vec3 normal = normalize(vec3(-dx, -dy, 1.0));
 
-    float sdfC = spikeField(p * 0.95, 12, 0.72 + wobble * 0.35, 0.18);
-    float sdfB = sdCapsule(p + vec2(0.0, wobble * 0.4), vec2(-1.4, 0.0), vec2(1.4, 0.0), 0.45);
-    float sdfV = sdCapsule(p + vec2(0.0, sin(p.x * 2.5 + seed) * 0.55), vec2(-1.2, 0.0), vec2(1.2, 0.0), 0.36);
-    float sdfS = sdCapsule(p + vec2(0.0, sin(p.x * 4.5 + seed) * 0.65), vec2(-1.3, 0.0), vec2(1.3, 0.0), 0.30);
-
-    float sdf = sdfC * isC + sdfB * isB + sdfV * isV + sdfS * isS;
-
-    float body = smoothstep(0.12, -0.12, sdf);
-    float outline = smoothstep(0.16, -0.16, sdf);
-    float rim = smoothstep(0.04, -0.02, sdf + 0.1);
-    float membrane = smoothstep(0.06, 0.0, abs(sdf + 0.05));
-
-    float nucleus = smoothstep(0.32, 0.0, sdCircle(p * 0.85 + vec2(0.1 * sin(seed), 0.1 * cos(seed)), 0.26));
-    float vacuole = smoothstep(0.14, 0.0, abs(sdCircle(p + vec2(0.3 * sin(seed * 0.7), 0.3 * cos(seed * 0.8)), 0.32)));
-    float dots = bandNoise(p + seed, 6.0);
-
-    float cilia = smoothstep(0.2, 0.0, abs(sin(atan(p.y, p.x) * 10.0 + seed))) *
-                  smoothstep(0.04, 0.0, abs(length(p) - 0.95)) * isC;
-
-    float flagella = 0.0;
-    if (isB + isV > 0.0) {
-        vec2 tailBase = vec2(sign(vDir.x) * 1.2, 0.0);
-        vec2 tailDir = normalize(vec2(vDir.x, vDir.y + 0.001));
-        float t = clamp(dot(p - tailBase, tailDir), -0.4, 1.6);
-        vec2 closest = tailBase + tailDir * t;
-        float wave = sin(t * 6.0 + u_time * 2.4 + seed) * 0.28;
-        closest.y += wave;
-        float dist = length(p - closest);
-        flagella = smoothstep(0.06, 0.0, dist) * (isB + isV);
-    }
-
-    float spines = smoothstep(0.08, 0.0, abs(p.x) - 1.05) * smoothstep(0.4, 0.0, abs(p.y)) * isS;
-
-    float alpha = max(body, max(flagella, max(cilia, spines)));
-    if (alpha <= 0.001) discard;
+    vec3 lightDir = normalize(vec3(0.25, 0.7, 0.6));
+    float lit = clamp(dot(normal, lightDir), 0.0, 1.0);
 
     vec3 base = vColor.rgb;
-    vec3 fill = mix(base, vec3(1.0), 0.18);
-    vec3 color = mix(base * 0.4, fill, outline);
-    color = mix(color, vec3(0.98, 0.78, 0.9), nucleus * 0.7);
-    color = mix(color, vec3(0.9, 0.97, 1.0), vacuole * 0.45);
-    color = mix(color, base * 0.6 + vec3(0.05, 0.07, 0.08), dots * 0.55);
-    color = mix(color, base * 0.5, membrane * 0.35);
-    color = mix(color, vec3(1.0), rim * 0.12);
+    vec3 color = shade_membrane(p, sdf, base, vSquish);
 
-    fragColor = vec4(color, alpha);
+    // Core glow
+    float core = smoothstep(-0.35, -0.08, sdf);
+    color = mix(color, base * 1.35, core * 0.5);
+
+    // Subtle axial striations for rods/diatoms
+    if (type == 1 || type == 5) {
+        float bands = sin((p.x + p.y * 0.3) * 12.0 + vSeed * 5.0);
+        bands = bands * 0.5 + 0.5;
+        color = mix(color, color * 0.8, bands * 0.12);
+    }
+
+    // Spiral highlight
+    if (type == 3) {
+        float ang = atan(p.y, p.x);
+        float highlight = sin(ang * 3.0 + t * 2.0 + vSeed * 6.0) * 0.5 + 0.5;
+        color = mix(color, base * 1.5, highlight * 0.25);
+    }
+
+    // Final lighting
+    color *= mix(0.9, 1.25, lit);
+
+    fragColor = vec4(color, alpha * vColor.a);
 }

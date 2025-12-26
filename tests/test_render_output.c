@@ -1,5 +1,7 @@
 #include "raylib.h"
 #include "game/game.h"
+#include "game/gpu_sim.h"
+#include "tests/test_env.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,7 +12,7 @@ static int pixel_matches(Color a, Color b) {
 
 int test_render_output_run(void) {
 #if defined(__linux__)
-    setenv("MESA_LOADER_DRIVER_OVERRIDE", "zink", 0);
+    test_set_env("MESA_LOADER_DRIVER_OVERRIDE", "zink");
 #endif
 
     SetConfigFlags(FLAG_WINDOW_HIDDEN | FLAG_WINDOW_RESIZABLE);
@@ -20,9 +22,15 @@ int test_render_output_run(void) {
         return 1;
     }
 
-    setenv("MICRO_IDLE_ENTITY_MAX", "512", 1);
-    setenv("MICRO_IDLE_ENTITY_COUNT", "512", 1);
-    setenv("MICRO_IDLE_INITIAL_ENTITIES", "128", 1);
+    if (!gpu_sim_supported()) {
+        printf("render output test failed: gpu sim unsupported on this renderer\n");
+        CloseWindow();
+        return 1;
+    }
+
+    test_set_env("MICRO_IDLE_ENTITY_MAX", "512");
+    test_set_env("MICRO_IDLE_ENTITY_COUNT", "512");
+    test_set_env("MICRO_IDLE_INITIAL_ENTITIES", "128");
 
     Camera3D camera = {0};
     camera.position = (Vector3){0.0f, 22.0f, 0.0f};

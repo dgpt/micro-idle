@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include "tests/test_env.h"
 
 int test_time_run(void);
 int test_rng_run(void);
@@ -9,6 +10,7 @@ int test_game_run(void);
 int test_render_output_run(void);
 
 int main(void) {
+    test_set_env("MICRO_IDLE_ALLOW_SOFT", "1");
     int fails = 0;
     fails += test_time_run();
     fails += test_rng_run();

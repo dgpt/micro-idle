@@ -1,13 +1,14 @@
 #include "game/game.h"
 #include "game/gpu_sim.h"
 #include "raylib.h"
+#include "tests/test_env.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 
 int test_game_run(void) {
 #if defined(__linux__)
-    setenv("MESA_LOADER_DRIVER_OVERRIDE", "zink", 0);
+    test_set_env("MESA_LOADER_DRIVER_OVERRIDE", "zink");
 #endif
 
     game_destroy(NULL);
@@ -18,6 +19,12 @@ int test_game_run(void) {
     InitWindow(640, 360, "game_test");
     if (!IsWindowReady()) {
         printf("game window failed to init\n");
+        return 1;
+    }
+
+    if (!gpu_sim_supported()) {
+        printf("game test failed: gpu sim unsupported on this renderer\n");
+        CloseWindow();
         return 1;
     }
 
@@ -33,14 +40,14 @@ int test_game_run(void) {
     gpu_sim_test_set_fail_mode(0);
 #endif
 
-    unsetenv("MICRO_IDLE_ENTITY_MAX");
-    unsetenv("MICRO_IDLE_ENTITY_COUNT");
-    unsetenv("MICRO_IDLE_INITIAL_ENTITIES");
-    unsetenv("MICRO_IDLE_ENTITIES_PER_SEC");
-    unsetenv("MICRO_IDLE_BOUNDS_X");
-    unsetenv("MICRO_IDLE_BOUNDS_Z");
-    unsetenv("MICRO_IDLE_PLANE_WIDTH");
-    unsetenv("MICRO_IDLE_PLANE_HEIGHT");
+    test_unset_env("MICRO_IDLE_ENTITY_MAX");
+    test_unset_env("MICRO_IDLE_ENTITY_COUNT");
+    test_unset_env("MICRO_IDLE_INITIAL_ENTITIES");
+    test_unset_env("MICRO_IDLE_ENTITIES_PER_SEC");
+    test_unset_env("MICRO_IDLE_BOUNDS_X");
+    test_unset_env("MICRO_IDLE_BOUNDS_Z");
+    test_unset_env("MICRO_IDLE_PLANE_WIDTH");
+    test_unset_env("MICRO_IDLE_PLANE_HEIGHT");
     GameState *defaults = game_create(0x1234u);
     if (!defaults) {
         printf("game create failed for defaults\n");
@@ -49,10 +56,10 @@ int test_game_run(void) {
     }
     game_destroy(defaults);
 
-    setenv("MICRO_IDLE_ENTITY_MAX", "5", 1);
-    setenv("MICRO_IDLE_ENTITY_COUNT", "5", 1);
-    setenv("MICRO_IDLE_INITIAL_ENTITIES", "100", 1);
-    setenv("MICRO_IDLE_ENTITIES_PER_SEC", "3", 1);
+    test_set_env("MICRO_IDLE_ENTITY_MAX", "5");
+    test_set_env("MICRO_IDLE_ENTITY_COUNT", "5");
+    test_set_env("MICRO_IDLE_INITIAL_ENTITIES", "100");
+    test_set_env("MICRO_IDLE_ENTITIES_PER_SEC", "3");
     GameState *clamped = game_create(0xFA17u);
     if (!clamped) {
         printf("game create failed for clamp test\n");
@@ -62,10 +69,10 @@ int test_game_run(void) {
     game_update_fixed(clamped, 1.1f);
     game_destroy(clamped);
 
-    setenv("MICRO_IDLE_ENTITY_MAX", "5", 1);
-    setenv("MICRO_IDLE_ENTITY_COUNT", "5", 1);
-    setenv("MICRO_IDLE_INITIAL_ENTITIES", "2", 1);
-    setenv("MICRO_IDLE_ENTITIES_PER_SEC", "4", 1);
+    test_set_env("MICRO_IDLE_ENTITY_MAX", "5");
+    test_set_env("MICRO_IDLE_ENTITY_COUNT", "5");
+    test_set_env("MICRO_IDLE_INITIAL_ENTITIES", "2");
+    test_set_env("MICRO_IDLE_ENTITIES_PER_SEC", "4");
     GameState *spawn = game_create(0xABCDu);
     if (!spawn) {
         printf("game create failed for spawn test\n");
@@ -75,14 +82,14 @@ int test_game_run(void) {
     game_update_fixed(spawn, 1.2f);
     game_destroy(spawn);
 
-    setenv("MICRO_IDLE_ENTITY_MAX", "500", 1);
-    setenv("MICRO_IDLE_ENTITY_COUNT", "bad", 1);
-    setenv("MICRO_IDLE_INITIAL_ENTITIES", "100", 1);
-    setenv("MICRO_IDLE_ENTITIES_PER_SEC", "2", 1);
-    setenv("MICRO_IDLE_BOUNDS_X", "-1", 1);
-    setenv("MICRO_IDLE_BOUNDS_Z", "8.5", 1);
-    setenv("MICRO_IDLE_PLANE_WIDTH", "40", 1);
-    setenv("MICRO_IDLE_PLANE_HEIGHT", "0", 1);
+    test_set_env("MICRO_IDLE_ENTITY_MAX", "500");
+    test_set_env("MICRO_IDLE_ENTITY_COUNT", "bad");
+    test_set_env("MICRO_IDLE_INITIAL_ENTITIES", "100");
+    test_set_env("MICRO_IDLE_ENTITIES_PER_SEC", "2");
+    test_set_env("MICRO_IDLE_BOUNDS_X", "-1");
+    test_set_env("MICRO_IDLE_BOUNDS_Z", "8.5");
+    test_set_env("MICRO_IDLE_PLANE_WIDTH", "40");
+    test_set_env("MICRO_IDLE_PLANE_HEIGHT", "0");
     GameState *probe = game_create(0xFACEB00Cu);
     if (!probe) {
         printf("game create failed for probe\n");
@@ -91,14 +98,14 @@ int test_game_run(void) {
     }
     game_destroy(probe);
 
-    setenv("MICRO_IDLE_ENTITY_MAX", "20000", 1);
-    setenv("MICRO_IDLE_ENTITY_COUNT", "20000", 1);
-    setenv("MICRO_IDLE_INITIAL_ENTITIES", "200", 1);
-    setenv("MICRO_IDLE_ENTITIES_PER_SEC", "5", 1);
-    setenv("MICRO_IDLE_BOUNDS_X", "18.0", 1);
-    setenv("MICRO_IDLE_BOUNDS_Z", "15.0", 1);
-    setenv("MICRO_IDLE_PLANE_WIDTH", "36.0", 1);
-    setenv("MICRO_IDLE_PLANE_HEIGHT", "28.0", 1);
+    test_set_env("MICRO_IDLE_ENTITY_MAX", "20000");
+    test_set_env("MICRO_IDLE_ENTITY_COUNT", "20000");
+    test_set_env("MICRO_IDLE_INITIAL_ENTITIES", "200");
+    test_set_env("MICRO_IDLE_ENTITIES_PER_SEC", "5");
+    test_set_env("MICRO_IDLE_BOUNDS_X", "18.0");
+    test_set_env("MICRO_IDLE_BOUNDS_Z", "15.0");
+    test_set_env("MICRO_IDLE_PLANE_WIDTH", "36.0");
+    test_set_env("MICRO_IDLE_PLANE_HEIGHT", "28.0");
 
     Camera3D camera = {0};
     camera.position = (Vector3){0.0f, 22.0f, 0.0f};

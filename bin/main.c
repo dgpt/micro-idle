@@ -62,7 +62,7 @@ int main(void) {
 
         BeginDrawing();
         rlViewport(0, 0, screen_w, screen_h);
-        ClearBackground((Color){8, 12, 18, 255});
+        ClearBackground((Color){10, 20, 30, 255});
         game_render(game, camera, engine_time_alpha(&engine));
         game_render_ui(game, screen_w, screen_h);
         EndDrawing();

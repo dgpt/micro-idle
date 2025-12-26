@@ -147,11 +147,13 @@ static unsigned int link_program(unsigned int shader) {
 }
 
 static void init_quad(GpuSim *sim) {
+    // Slightly oversized quad so curved/flagellated sprites are not clipped at the edges.
+    const float s = 1.4f;
     float verts[] = {
-        -0.5f, 0.0f, -0.5f,
-         0.5f, 0.0f, -0.5f,
-         0.5f, 0.0f,  0.5f,
-        -0.5f, 0.0f,  0.5f
+        -s, 0.0f, -s,
+         s, 0.0f, -s,
+         s, 0.0f,  s,
+        -s, 0.0f,  s
     };
     unsigned short indices[] = {0, 1, 2, 2, 3, 0};
 
@@ -187,6 +189,17 @@ static bool init_entities(GpuSim *sim, int count) {
         return false;
     }
 
+    static const float palette[6][3] = {
+        {0.46f, 0.92f, 0.74f}, // coccus - mint
+        {0.47f, 0.78f, 0.97f}, // bacillus - cyan
+        {0.97f, 0.78f, 0.33f}, // vibrio - amber
+        {0.55f, 0.46f, 0.98f}, // spirillum - indigo
+        {0.52f, 0.94f, 0.98f}, // amoeboid - teal
+        {0.98f, 0.58f, 0.72f}  // diatom - coral
+    };
+    static const float base_radius[6] = {0.85f, 1.25f, 1.05f, 1.0f, 1.05f, 0.95f};
+    static const float var_radius[6] = {0.35f, 0.3f, 0.35f, 0.3f, 0.4f, 0.25f};
+
     for (int i = 0; i < count; ++i) {
         uint32_t seed = (uint32_t)(i + 1) * 2654435761u;
         seed ^= seed >> 16;
@@ -195,7 +208,7 @@ static bool init_entities(GpuSim *sim, int count) {
         float r2 = (float)(seed & 0xFFFFu) / 65535.0f;
         seed = seed * 3266489917u + 668265263u;
         float r3 = (float)(seed & 0xFFFFu) / 65535.0f;
-        int type = (int)(seed % 4u);
+        int type = (int)(seed % 6u);
         float px = ((float)(i % 1000) / 1000.0f - 0.5f) * 24.0f;
         float pz = ((float)(i / 1000) / 1000.0f - 0.5f) * 20.0f;
         entities[i].pos[0] = px;
@@ -206,33 +219,12 @@ static bool init_entities(GpuSim *sim, int count) {
         entities[i].vel[1] = 0.0f;
         entities[i].vel[2] = (r2 - 0.5f) * 0.3f;
         entities[i].vel[3] = 0.0f;
-        switch (type) {
-            case 0:
-                entities[i].color[0] = 0.26f;
-                entities[i].color[1] = 0.76f;
-                entities[i].color[2] = 0.36f;
-                break;
-            case 1:
-                entities[i].color[0] = 0.18f;
-                entities[i].color[1] = 0.56f;
-                entities[i].color[2] = 0.78f;
-                break;
-            case 2:
-                entities[i].color[0] = 0.96f;
-                entities[i].color[1] = 0.72f;
-                entities[i].color[2] = 0.18f;
-                break;
-            default:
-                entities[i].color[0] = 0.78f;
-                entities[i].color[1] = 0.28f;
-                entities[i].color[2] = 0.76f;
-                break;
-        }
-        entities[i].color[0] += (r3 - 0.5f) * 0.12f;
-        entities[i].color[1] += (r1 - 0.5f) * 0.12f;
-        entities[i].color[2] += (r2 - 0.5f) * 0.12f;
-        entities[i].color[3] = 0.55f;
-        entities[i].params[0] = 0.9f + r3 * 1.25f;
+        entities[i].color[0] = palette[type][0] + (r3 - 0.5f) * 0.08f;
+        entities[i].color[1] = palette[type][1] + (r1 - 0.5f) * 0.08f;
+        entities[i].color[2] = palette[type][2] + (r2 - 0.5f) * 0.08f;
+        entities[i].color[3] = 0.62f + (r1 - 0.5f) * 0.1f;
+
+        entities[i].params[0] = base_radius[type] + r3 * var_radius[type];
         entities[i].params[1] = 0.0f;
         entities[i].params[2] = (float)type;
         entities[i].params[3] = r2;
@@ -272,13 +264,15 @@ static bool validate_gpu_sim_limits(int count) {
 }
 
 bool gpu_sim_init(GpuSim *sim, int entity_count) {
+    if (!gpu_sim_supported()) {
+        fprintf(stderr, "gpu_sim: initialization aborted; GPU requirements not met.\n");
+        return false;
+    }
+
     memset(sim, 0, sizeof(*sim));
     sim->entity_count = entity_count;
     sim->active_count = entity_count;
 
-    if (!gpu_sim_supported()) {
-        return false;
-    }
     if (!validate_gpu_sim_limits(entity_count)) {
         return false;
     }
@@ -316,6 +310,7 @@ bool gpu_sim_init(GpuSim *sim, int entity_count) {
     sim->loc_active_insert = glGetUniformLocation(sim->sim_insert_program, "u_active");
     sim->loc_active_collide = glGetUniformLocation(sim->sim_collide_program, "u_active");
     sim->loc_time = GetShaderLocation(sim->render_shader, "u_time");
+    sim->loc_time_collide = glGetUniformLocation(sim->sim_collide_program, "u_time");
 
     init_quad(sim);
     if (!init_entities(sim, entity_count)) {
@@ -369,6 +364,8 @@ void gpu_sim_update(GpuSim *sim, float dt, Vector2 bounds) {
     }
     glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT);
 
+    sim->sim_time += dt;
+
     glUseProgram(sim->sim_collide_program);
     glUniform1f(sim->loc_dt, dt);
     glUniform2f(sim->loc_bounds, bounds.x, bounds.y);
@@ -376,6 +373,9 @@ void gpu_sim_update(GpuSim *sim, float dt, Vector2 bounds) {
     glUniform2i(sim->loc_grid_dim, grid_dim[0], grid_dim[1]);
     if (sim->loc_active_collide >= 0) {
         glUniform1i(sim->loc_active_collide, sim->active_count);
+    }
+    if (sim->loc_time_collide >= 0) {
+        glUniform1f(sim->loc_time_collide, sim->sim_time);
     }
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, sim->ssbo);
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, sim->ssbo_head);
@@ -430,7 +430,16 @@ bool gpu_sim_supported(void) {
     GLint minor = 0;
     glGetIntegerv(GL_MAJOR_VERSION, &major);
     glGetIntegerv(GL_MINOR_VERSION, &minor);
-    return (major > 4) || (major == 4 && minor >= 6);
+    if (!((major > 4) || (major == 4 && minor >= 3))) {
+        return false;
+    }
+    const char *renderer = (const char *)glGetString(GL_RENDERER);
+    bool soft = renderer && (strstr(renderer, "llvmpipe") || strstr(renderer, "Software"));
+    if (soft) {
+        fprintf(stderr, "gpu_sim: software renderer detected (%s); GPU mode required.\n", renderer ? renderer : "unknown");
+        return false;
+    }
+    return true;
 }
 
 void gpu_sim_set_active_count(GpuSim *sim, int active_count) {
@@ -444,4 +453,14 @@ void gpu_sim_set_active_count(GpuSim *sim, int active_count) {
         active_count = sim->entity_count;
     }
     sim->active_count = active_count;
+}
+
+void gpu_sim_upload_entities(GpuSim *sim, const void *data, int count) {
+    if (!sim || !sim->ready || !data || count <= 0) return;
+    if (count > sim->entity_count) count = sim->entity_count;
+
+    size_t size = sizeof(GpuEntity) * (size_t)count;
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, sim->ssbo);
+    glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, size, data);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 }

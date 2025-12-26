@@ -1,4 +1,4 @@
-#version 460 core
+#version 430 core
 
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
@@ -13,6 +13,7 @@ uniform vec2 u_bounds;
 uniform float u_cell;
 uniform ivec2 u_grid_dim;
 uniform int u_active;
+uniform float u_time;
 
 void main() {
     uint idx = gl_GlobalInvocationID.x;
@@ -21,14 +22,18 @@ void main() {
     vec3 p = entities[idx].pos.xyz;
     vec3 v = entities[idx].vel.xyz;
     float radius = entities[idx].params.x;
+    float type = floor(entities[idx].params.z + 0.5);
+    float seed = entities[idx].params.w;
 
+    // Grid cell for spatial hashing
     int gx = int((p.x + u_bounds.x) / u_cell);
     int gz = int((p.z + u_bounds.y) / u_cell);
     gx = clamp(gx, 0, u_grid_dim.x - 1);
     gz = clamp(gz, 0, u_grid_dim.y - 1);
 
-    vec3 push = vec3(0.0);
-    float squish = entities[idx].params.y;
+    // Collision detection and response
+    vec3 separation = vec3(0.0);
+    float maxPenetration = 0.0;
 
     for (int dz = -1; dz <= 1; ++dz) {
         int nz = gz + dz;
@@ -39,31 +44,85 @@ void main() {
             int cell = nz * u_grid_dim.x + nx;
             for (int j = head[cell]; j != -1; j = next[j]) {
                 if (j == int(idx)) continue;
-                vec3 op = entities[j].pos.xyz;
-                float orad = entities[j].params.x;
-                vec3 d = p - op;
-                float dist2 = dot(d, d);
-                float r = radius + orad;
-                if (dist2 < r * r && dist2 > 0.00001) {
-                    float dist = sqrt(dist2);
-                    vec3 n = d / dist;
-                    float overlap = r - dist;
-                    push += n * overlap * 0.7;
-                    squish = max(squish, overlap / r);
+                vec3 otherPos = entities[j].pos.xyz;
+                float otherRad = entities[j].params.x;
+                vec3 delta = p - otherPos;
+                float dist = length(delta);
+                float minDist = radius + otherRad;
+
+                if (dist < minDist && dist > 0.0001) {
+                    float penetration = (minDist - dist) / minDist;
+                    maxPenetration = max(maxPenetration, penetration);
+
+                    // Soft push - proportional to overlap
+                    vec3 normal = delta / dist;
+                    float pushStrength = (minDist - dist) * 0.5;
+                    separation += normal * pushStrength;
                 }
             }
         }
     }
 
-    v += push * 4.2;
-    v *= 0.965;
+    // Store squish amount (0 = none, 1 = fully squished)
+    // Smooth transition - squish builds up and decays smoothly
+    float currentSquish = entities[idx].params.y;
+    float targetSquish = clamp(maxPenetration * 2.0, 0.0, 1.0);
+    float squishSpeed = targetSquish > currentSquish ? 15.0 : 3.0; // Fast squish, slow recovery
+    float newSquish = mix(currentSquish, targetSquish, 1.0 - exp(-squishSpeed * u_dt));
+
+    // Apply separation force
+    v += separation * 8.0 * u_dt;
+
+    // Simple self-propulsion based on type
+    // Use seed for consistent random direction
+    float angle = seed * 6.283 + u_time * (0.3 + seed * 0.2);
+    vec2 swimDir = vec2(cos(angle), sin(angle));
+
+    // Different speeds per type
+    float swimForce = 0.0;
+    if (type < 0.5) swimForce = 0.8;       // Coccus - slow
+    else if (type < 1.5) swimForce = 2.0;  // Bacillus - fast
+    else if (type < 2.5) swimForce = 1.5;  // Vibrio - medium
+    else swimForce = 1.2;                   // Spirillum - medium
+
+    v.xz += swimDir * swimForce * u_dt;
+
+    // Drag - simple and consistent
+    float drag = exp(-2.0 * u_dt);
+    v *= drag;
+
+    // Clamp velocity
+    float speed = length(v);
+    if (speed > 4.0) v *= 4.0 / speed;
+
+    // Update position
     p += v * u_dt;
 
-    if (p.x < -u_bounds.x || p.x > u_bounds.x) v.x *= -0.8;
-    if (p.z < -u_bounds.y || p.z > u_bounds.y) v.z *= -0.8;
-    p = clamp(p, vec3(-u_bounds.x, 0.0, -u_bounds.y), vec3(u_bounds.x, 0.0, u_bounds.y));
+    // Boundary handling - soft bounce with squish
+    float boundarySquish = 0.0;
+    if (p.x < -u_bounds.x + radius) {
+        p.x = -u_bounds.x + radius;
+        v.x = abs(v.x) * 0.3;
+        boundarySquish = 0.6;
+    }
+    if (p.x > u_bounds.x - radius) {
+        p.x = u_bounds.x - radius;
+        v.x = -abs(v.x) * 0.3;
+        boundarySquish = 0.6;
+    }
+    if (p.z < -u_bounds.y + radius) {
+        p.z = -u_bounds.y + radius;
+        v.z = abs(v.z) * 0.3;
+        boundarySquish = 0.6;
+    }
+    if (p.z > u_bounds.y - radius) {
+        p.z = u_bounds.y - radius;
+        v.z = -abs(v.z) * 0.3;
+        boundarySquish = 0.6;
+    }
+    newSquish = max(newSquish, boundarySquish);
 
     entities[idx].pos = vec4(p, 1.0);
     entities[idx].vel = vec4(v, 0.0);
-    entities[idx].params.y = clamp(max(0.0, squish - u_dt * 0.7), 0.0, 1.2);
+    entities[idx].params.y = newSquish;
 }

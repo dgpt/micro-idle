@@ -1,0 +1,86 @@
+#version 430 core
+
+// XPBD Step 2: Solve constraints
+// Iteratively project distance constraints using XPBD formulation.
+// Key formula: Δλ = -(C + α̃λ) / (w1|∇C|² + w2|∇C|² + α̃)
+
+layout(local_size_x = 256) in;
+
+struct Particle {
+    vec4 pos;       // xyz position, w = inverse mass
+    vec4 pos_prev;  // previous position
+    vec4 vel;       // xyz velocity, w = microbe_id
+    vec4 data;      // x = particle_index, y = constraint_start, z = constraint_count
+};
+
+struct Constraint {
+    int p1;              // particle index 1
+    int p2;              // particle index 2
+    float rest_length;   // target distance
+    float compliance;    // alpha (inverse stiffness)
+    float lambda;        // accumulated Lagrange multiplier
+    float padding[3];
+};
+
+layout(std430, binding = 0) buffer Particles { Particle particles[]; };
+layout(std430, binding = 1) buffer Constraints { Constraint constraints[]; };
+
+uniform float u_dt;
+uniform int u_constraint_count;
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= uint(u_constraint_count)) return;
+
+    Constraint c = constraints[idx];
+
+    // Get particle positions and inverse masses
+    vec3 x1 = particles[c.p1].pos.xyz;
+    vec3 x2 = particles[c.p2].pos.xyz;
+    float w1 = particles[c.p1].pos.w;  // inverse mass
+    float w2 = particles[c.p2].pos.w;
+
+    // Skip if both particles are fixed
+    if (w1 < 0.0001 && w2 < 0.0001) return;
+
+    // Compute constraint: C = |x1 - x2| - rest_length
+    vec3 delta = x1 - x2;
+    float dist = length(delta);
+
+    // Avoid division by zero
+    if (dist < 0.0001) return;
+
+    float C = dist - c.rest_length;
+
+    // Gradient of constraint (normalized direction)
+    vec3 gradC = delta / dist;
+
+    // Compliance parameter: α̃ = α / dt²
+    float alpha_tilde = c.compliance / (u_dt * u_dt);
+
+    // Denominator: w1|∇C|² + w2|∇C|² + α̃
+    // Since |gradC| = 1 for distance constraints: K = w1 + w2 + α̃
+    float K = w1 + w2 + alpha_tilde;
+
+    if (K < 0.0001) return;
+
+    // Compute Lagrange multiplier change
+    // Δλ = -(C + α̃λ) / K
+    float delta_lambda = -(C + alpha_tilde * c.lambda) / K;
+
+    // Update accumulated multiplier
+    constraints[idx].lambda = c.lambda + delta_lambda;
+
+    // Apply position corrections
+    // Δx1 = +w1 * Δλ * ∇C
+    // Δx2 = -w2 * Δλ * ∇C
+    vec3 correction = delta_lambda * gradC;
+
+    // Atomic-style updates (may need barriers in practice)
+    if (w1 > 0.0001) {
+        particles[c.p1].pos.xyz += w1 * correction;
+    }
+    if (w2 > 0.0001) {
+        particles[c.p2].pos.xyz -= w2 * correction;
+    }
+}

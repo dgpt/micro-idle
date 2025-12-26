@@ -1,0 +1,34 @@
+#version 450
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+struct Entity { vec4 pos; vec4 vel; vec4 color; vec4 params; };
+
+layout(std430, binding = 0) buffer Entities { Entity entities[]; };
+layout(std430, binding = 1) buffer GridHead { int head[]; };
+layout(std430, binding = 2) buffer GridNext { int next[]; };
+
+layout(push_constant) uniform PushConstants {
+    float dt;
+    float bounds_x;
+    float bounds_y;
+    float cell;
+    int grid_w;
+    int grid_h;
+    int active_count;
+    int pad;
+} pc;
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= uint(pc.active_count) || idx >= entities.length()) return;
+
+    vec3 p = entities[idx].pos.xyz;
+    int gx = int((p.x + pc.bounds_x) / pc.cell);
+    int gz = int((p.z + pc.bounds_y) / pc.cell);
+    gx = clamp(gx, 0, pc.grid_w - 1);
+    gz = clamp(gz, 0, pc.grid_h - 1);
+
+    int cell_idx = gz * pc.grid_w + gx;
+    next[idx] = atomicExchange(head[cell_idx], int(idx));
+}

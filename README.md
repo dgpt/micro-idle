@@ -62,6 +62,18 @@ Microbes exhibit **procedural, readable motion** tied to their biology:
 
 Motion communicates state and threat level rather than serving as pure spectacle.
 
+### **Physics: Soft-Body Simulation**
+
+Microbes are physically simulated as **deformable soft bodies** using XPBD (Extended Position Based Dynamics):
+
+* Each microbe is a cluster of particles connected by distance constraints
+* Collisions cause visible **squishing and deformation**
+* Shape recovery is smooth and satisfying (like jello/water balloons)
+* Different microbe types have different stiffness/squishiness
+* Physics runs entirely on GPU via compute shaders
+
+This creates microbes that feel **alive and tactile** rather than rigid sprites.
+
 ---
 
 ## **Resources (Biologically Grounded)**

@@ -26,6 +26,8 @@ typedef struct GpuSim {
     int loc_active_insert;
     int loc_active_collide;
     int loc_time;
+    int loc_time_collide;
+    float sim_time;
 } GpuSim;
 
 bool gpu_sim_init(GpuSim *sim, int entity_count);
@@ -34,6 +36,7 @@ void gpu_sim_update(GpuSim *sim, float dt, Vector2 bounds);
 void gpu_sim_render(const GpuSim *sim, Camera3D camera);
 bool gpu_sim_supported(void);
 void gpu_sim_set_active_count(GpuSim *sim, int active_count);
+void gpu_sim_upload_entities(GpuSim *sim, const void *data, int count);
 #ifdef GPU_SIM_TESTING
 void gpu_sim_test_set_fail_mode(int mode);
 #endif

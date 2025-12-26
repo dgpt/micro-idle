@@ -1,0 +1,51 @@
+#version 430 core
+
+// XPBD Step 3: Finalize
+// Update velocities from position changes and reset constraint lambdas.
+
+layout(local_size_x = 256) in;
+
+struct Particle {
+    vec4 pos;       // xyz position, w = inverse mass
+    vec4 pos_prev;  // previous position
+    vec4 vel;       // xyz velocity, w = microbe_id
+    vec4 data;      // x = particle_index, y = constraint_start, z = constraint_count
+};
+
+struct Constraint {
+    int p1;
+    int p2;
+    float rest_length;
+    float compliance;
+    float lambda;
+    float padding[3];
+};
+
+layout(std430, binding = 0) buffer Particles { Particle particles[]; };
+layout(std430, binding = 1) buffer Constraints { Constraint constraints[]; };
+
+uniform float u_dt;
+uniform int u_particle_count;
+uniform int u_constraint_count;
+uniform int u_mode;  // 0 = update velocities, 1 = reset lambdas
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+
+    if (u_mode == 0) {
+        // Update velocities from position change
+        if (idx >= uint(u_particle_count)) return;
+
+        Particle p = particles[idx];
+        float inv_mass = p.pos.w;
+
+        if (inv_mass > 0.0001 && u_dt > 0.0001) {
+            // v = (x - x_prev) / dt
+            particles[idx].vel.xyz = (p.pos.xyz - p.pos_prev.xyz) / u_dt;
+        }
+    } else {
+        // Reset constraint lambdas
+        if (idx >= uint(u_constraint_count)) return;
+        constraints[idx].lambda = 0.0;
+    }
+}

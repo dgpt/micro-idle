@@ -1,5 +1,6 @@
 #include "raylib.h"
 #include "game/gpu_sim.h"
+#include "tests/test_env.h"
 
 #include <limits.h>
 #include <stdio.h>
@@ -22,13 +23,19 @@ static int test_entity_count(void) {
 
 int test_gpu_sim_run(void) {
 #if defined(__linux__)
-    setenv("MESA_LOADER_DRIVER_OVERRIDE", "zink", 0);
+    test_set_env("MESA_LOADER_DRIVER_OVERRIDE", "zink");
 #endif
 
     SetConfigFlags(FLAG_WINDOW_HIDDEN);
     InitWindow(640, 360, "gpu_sim_test");
     if (!IsWindowReady()) {
         printf("gpu sim window failed to init\n");
+        return 1;
+    }
+
+    if (!gpu_sim_supported()) {
+        printf("gpu sim unsupported on this renderer (requires real GPU)\n");
+        CloseWindow();
         return 1;
     }
 
