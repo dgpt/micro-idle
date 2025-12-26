@@ -1,0 +1,69 @@
+#version 460 core
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+struct Entity { vec4 pos; vec4 vel; vec4 color; vec4 params; };
+
+layout(std430, binding = 0) buffer Entities { Entity entities[]; };
+layout(std430, binding = 1) buffer GridHead { int head[]; };
+layout(std430, binding = 2) buffer GridNext { int next[]; };
+
+uniform float u_dt;
+uniform vec2 u_bounds;
+uniform float u_cell;
+uniform ivec2 u_grid_dim;
+uniform int u_active;
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= uint(u_active) || idx >= entities.length()) return;
+
+    vec3 p = entities[idx].pos.xyz;
+    vec3 v = entities[idx].vel.xyz;
+    float radius = entities[idx].params.x;
+
+    int gx = int((p.x + u_bounds.x) / u_cell);
+    int gz = int((p.z + u_bounds.y) / u_cell);
+    gx = clamp(gx, 0, u_grid_dim.x - 1);
+    gz = clamp(gz, 0, u_grid_dim.y - 1);
+
+    vec3 push = vec3(0.0);
+    float squish = entities[idx].params.y;
+
+    for (int dz = -1; dz <= 1; ++dz) {
+        int nz = gz + dz;
+        if (nz < 0 || nz >= u_grid_dim.y) continue;
+        for (int dx = -1; dx <= 1; ++dx) {
+            int nx = gx + dx;
+            if (nx < 0 || nx >= u_grid_dim.x) continue;
+            int cell = nz * u_grid_dim.x + nx;
+            for (int j = head[cell]; j != -1; j = next[j]) {
+                if (j == int(idx)) continue;
+                vec3 op = entities[j].pos.xyz;
+                float orad = entities[j].params.x;
+                vec3 d = p - op;
+                float dist2 = dot(d, d);
+                float r = radius + orad;
+                if (dist2 < r * r && dist2 > 0.00001) {
+                    float dist = sqrt(dist2);
+                    vec3 n = d / dist;
+                    float overlap = r - dist;
+                    push += n * overlap * 0.7;
+                    squish = max(squish, overlap / r);
+                }
+            }
+        }
+    }
+
+    v += push * 4.2;
+    v *= 0.965;
+    p += v * u_dt;
+
+    if (p.x < -u_bounds.x || p.x > u_bounds.x) v.x *= -0.8;
+    if (p.z < -u_bounds.y || p.z > u_bounds.y) v.z *= -0.8;
+    p = clamp(p, vec3(-u_bounds.x, 0.0, -u_bounds.y), vec3(u_bounds.x, 0.0, u_bounds.y));
+
+    entities[idx].pos = vec4(p, 1.0);
+    entities[idx].vel = vec4(v, 0.0);
+    entities[idx].params.y = clamp(max(0.0, squish - u_dt * 0.7), 0.0, 1.2);
+}

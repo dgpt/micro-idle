@@ -17,821 +17,732 @@
         -:   13:#define GRID_W 128
         -:   14:#define GRID_H 128
         -:   15:#define GRID_CELLS (GRID_W * GRID_H)
-        -:   16:#define STR_HELPER(x) #x
-        -:   17:#define STR(x) STR_HELPER(x)
-        -:   18:
-        -:   19:typedef struct GpuEntity {
-        -:   20:    float pos[4];
-        -:   21:    float vel[4];
-        -:   22:    float color[4];
-        -:   23:    float params[4];
-        -:   24:} GpuEntity;
-        -:   25:
-        -:   26:#ifdef GPU_SIM_TESTING
-        -:   27:static int gpu_sim_fail_mode = 0;
-        -:   28:
+        -:   16:
+        -:   17:typedef struct GpuEntity {
+        -:   18:    float pos[4];
+        -:   19:    float vel[4];
+        -:   20:    float color[4];
+        -:   21:    float params[4];
+        -:   22:} GpuEntity;
+        -:   23:
+        -:   24:#ifdef GPU_SIM_TESTING
+        -:   25:static int gpu_sim_fail_mode = 0;
+        -:   26:
 function gpu_sim_test_set_fail_mode called 7 returned 100% blocks executed 100%
-        7:   29:void gpu_sim_test_set_fail_mode(int mode) {
-        7:   30:    gpu_sim_fail_mode = mode;
-        7:   31:}
-        -:   32:#endif
-        -:   33:
-        -:   34:static const char *kComputeInsertShader =
-        -:   35:    "#version 460 core\n"
-        -:   36:    "layout(local_size_x = " STR(GPU_WORKGROUP_SIZE) ", local_size_y = 1, local_size_z = 1) in;\n"
-        -:   37:    "struct Entity { vec4 pos; vec4 vel; vec4 color; vec4 params; };\n"
-        -:   38:    "layout(std430, binding = 0) buffer Entities { Entity entities[]; };\n"
-        -:   39:    "uniform int u_active;\n"
-        -:   40:    "uniform vec2 u_bounds;\n"
-        -:   41:    "uniform float u_cell;\n"
-        -:   42:    "uniform ivec2 u_grid_dim;\n"
-        -:   43:    "layout(std430, binding = 1) buffer GridHead { int head[]; };\n"
-        -:   44:    "layout(std430, binding = 2) buffer GridNext { int next[]; };\n"
-        -:   45:    "void main() {\n"
-        -:   46:    "    uint idx = gl_GlobalInvocationID.x;\n"
-        -:   47:    "    if (idx >= uint(u_active) || idx >= entities.length()) return;\n"
-        -:   48:    "    vec3 p = entities[idx].pos.xyz;\n"
-        -:   49:    "    int gx = int((p.x + u_bounds.x) / (u_cell));\n"
-        -:   50:    "    int gz = int((p.z + u_bounds.y) / (u_cell));\n"
-        -:   51:    "    gx = clamp(gx, 0, u_grid_dim.x - 1);\n"
-        -:   52:    "    gz = clamp(gz, 0, u_grid_dim.y - 1);\n"
-        -:   53:    "    int cell = gz * u_grid_dim.x + gx;\n"
-        -:   54:    "    next[idx] = atomicExchange(head[cell], int(idx));\n"
-        -:   55:    "}\n";
-        -:   56:
-        -:   57:static const char *kComputeCollideShader =
-        -:   58:    "#version 460 core\n"
-        -:   59:    "layout(local_size_x = " STR(GPU_WORKGROUP_SIZE) ", local_size_y = 1, local_size_z = 1) in;\n"
-        -:   60:    "struct Entity { vec4 pos; vec4 vel; vec4 color; vec4 params; };\n"
-        -:   61:    "layout(std430, binding = 0) buffer Entities { Entity entities[]; };\n"
-        -:   62:    "layout(std430, binding = 1) buffer GridHead { int head[]; };\n"
-        -:   63:    "layout(std430, binding = 2) buffer GridNext { int next[]; };\n"
-        -:   64:    "uniform float u_dt;\n"
-        -:   65:    "uniform vec2 u_bounds;\n"
-        -:   66:    "uniform float u_cell;\n"
-        -:   67:    "uniform ivec2 u_grid_dim;\n"
-        -:   68:    "uniform int u_active;\n"
-        -:   69:    "void main() {\n"
-        -:   70:    "    uint idx = gl_GlobalInvocationID.x;\n"
-        -:   71:    "    if (idx >= uint(u_active) || idx >= entities.length()) return;\n"
-        -:   72:    "    vec3 p = entities[idx].pos.xyz;\n"
-        -:   73:    "    vec3 v = entities[idx].vel.xyz;\n"
-        -:   74:    "    float radius = entities[idx].params.x;\n"
-        -:   75:    "    int gx = int((p.x + u_bounds.x) / (u_cell));\n"
-        -:   76:    "    int gz = int((p.z + u_bounds.y) / (u_cell));\n"
-        -:   77:    "    gx = clamp(gx, 0, u_grid_dim.x - 1);\n"
-        -:   78:    "    gz = clamp(gz, 0, u_grid_dim.y - 1);\n"
-        -:   79:    "    vec3 push = vec3(0.0);\n"
-        -:   80:    "    float squish = entities[idx].params.y;\n"
-        -:   81:    "    for (int dz = -1; dz <= 1; ++dz) {\n"
-        -:   82:    "        int nz = gz + dz;\n"
-        -:   83:    "        if (nz < 0 || nz >= u_grid_dim.y) continue;\n"
-        -:   84:    "        for (int dx = -1; dx <= 1; ++dx) {\n"
-        -:   85:    "            int nx = gx + dx;\n"
-        -:   86:    "            if (nx < 0 || nx >= u_grid_dim.x) continue;\n"
-        -:   87:    "            int cell = nz * u_grid_dim.x + nx;\n"
-        -:   88:    "            for (int j = head[cell]; j != -1; j = next[j]) {\n"
-        -:   89:    "                if (j == int(idx)) continue;\n"
-        -:   90:    "                vec3 op = entities[j].pos.xyz;\n"
-        -:   91:    "                float orad = entities[j].params.x;\n"
-        -:   92:    "                vec3 d = p - op;\n"
-        -:   93:    "                float dist2 = dot(d, d);\n"
-        -:   94:    "                float r = radius + orad;\n"
-        -:   95:    "                if (dist2 < r * r && dist2 > 0.00001) {\n"
-        -:   96:    "                    float dist = sqrt(dist2);\n"
-        -:   97:    "                    vec3 n = d / dist;\n"
-        -:   98:    "                    float overlap = r - dist;\n"
-        -:   99:    "                    push += n * overlap * 0.7;\n"
-        -:  100:    "                    squish = max(squish, overlap / r);\n"
-        -:  101:    "                }\n"
-        -:  102:    "            }\n"
-        -:  103:    "        }\n"
-        -:  104:    "    }\n"
-        -:  105:    "    v += push * 4.2;\n"
-        -:  106:    "    v *= 0.965;\n"
-        -:  107:    "    p += v * u_dt;\n"
-        -:  108:    "    if (p.x < -u_bounds.x || p.x > u_bounds.x) v.x *= -0.8;\n"
-        -:  109:    "    if (p.z < -u_bounds.y || p.z > u_bounds.y) v.z *= -0.8;\n"
-        -:  110:    "    p = clamp(p, vec3(-u_bounds.x, 0.0, -u_bounds.y), vec3(u_bounds.x, 0.0, u_bounds.y));\n"
-        -:  111:    "    entities[idx].pos = vec4(p, 1.0);\n"
-        -:  112:    "    entities[idx].vel = vec4(v, 0.0);\n"
-        -:  113:    "    entities[idx].params.y = clamp(max(0.0, squish - u_dt * 0.7), 0.0, 1.2);\n"
-        -:  114:    "}\n";
-        -:  115:
-        -:  116:static const char *kVertexShader =
-        -:  117:    "#version 460 core\n"
-        -:  118:    "layout(location = 0) in vec3 aPos;\n"
-        -:  119:    "struct Entity { vec4 pos; vec4 vel; vec4 color; vec4 params; };\n"
-        -:  120:    "layout(std430, binding = 0) readonly buffer Entities { Entity entities[]; };\n"
-        -:  121:    "layout(location = 0) uniform mat4 u_vp;\n"
-        -:  122:    "uniform float u_time;\n"
-        -:  123:    "out vec4 vColor;\n"
-        -:  124:    "out vec2 vLocal;\n"
-        -:  125:    "out float vType;\n"
-        -:  126:    "out float vSeed;\n"
-        -:  127:    "out float vSquish;\n"
-        -:  128:    "void main() {\n"
-        -:  129:    "    uint idx = uint(gl_InstanceID);\n"
-        -:  130:    "    vec3 center = entities[idx].pos.xyz;\n"
-        -:  131:    "    float scale = entities[idx].params.x;\n"
-        -:  132:    "    float squish = entities[idx].params.y;\n"
-        -:  133:    "    float t = floor(entities[idx].params.z + 0.5);\n"
-        -:  134:    "    float seed = entities[idx].params.w;\n"
-        -:  135:    "    float isBac = 1.0 - step(0.5, abs(t - 1.0));\n"
-        -:  136:    "    float isVib = 1.0 - step(0.5, abs(t - 2.0));\n"
-        -:  137:    "    float isSpi = 1.0 - step(0.5, abs(t - 3.0));\n"
-        -:  138:    "    float elong = 1.0 + 0.7 * (isBac + isVib) + 1.1 * isSpi;\n"
-        -:  139:    "    float height = 1.0 - 0.15 * isSpi;\n"
-        -:  140:    "    vec2 dir = normalize(entities[idx].vel.xz + vec2(0.0001));\n"
-        -:  141:    "    vec2 perp = vec2(-dir.y, dir.x);\n"
-        -:  142:    "    float stretch = 1.0 + squish * 0.6;\n"
-        -:  143:    "    float squash = 1.0 - squish * 0.4;\n"
-        -:  144:    "    vec2 local = vec2(aPos.x * elong, aPos.z * height);\n"
-        -:  145:    "    vec2 warped = dir * (dot(local, dir) * stretch) + perp * (dot(local, perp) * squash);\n"
-        -:  146:    "    vec2 local01 = local * 2.0;\n"
-        -:  147:    "    float dome = max(0.0, 1.0 - dot(local01, local01));\n"
-        -:  148:    "    float undulate = 1.0 + 0.05 * sin(u_time * (1.2 + seed * 1.7) + dot(local01, vec2(6.0, 4.0)));\n"
-        -:  149:    "    vec3 world = center + vec3(warped.x, dome * 0.35 * undulate, warped.y) * scale;\n"
-        -:  150:    "    gl_Position = u_vp * vec4(world, 1.0);\n"
-        -:  151:    "    vColor = entities[idx].color;\n"
-        -:  152:    "    vLocal = local01;\n"
-        -:  153:    "    vType = t;\n"
-        -:  154:    "    vSeed = seed;\n"
-        -:  155:    "    vSquish = squish;\n"
-        -:  156:    "}\n";
-        -:  157:
-        -:  158:static const char *kFragmentShader =
-        -:  159:    "#version 460 core\n"
-        -:  160:    "in vec4 vColor;\n"
-        -:  161:    "in vec2 vLocal;\n"
-        -:  162:    "in float vType;\n"
-        -:  163:    "in float vSeed;\n"
-        -:  164:    "in float vSquish;\n"
-        -:  165:    "uniform float u_time;\n"
-        -:  166:    "out vec4 fragColor;\n"
-        -:  167:    "const float PI = 3.14159265;\n"
-        -:  168:    "float hash21(vec2 p) {\n"
-        -:  169:    "    return fract(sin(dot(p, vec2(127.1, 311.7)) + vSeed * 13.7) * 43758.5453);\n"
-        -:  170:    "}\n"
-        -:  171:    "float sdf_capsule(vec2 p, float halfLen, float radius) {\n"
-        -:  172:    "    vec2 d = vec2(abs(p.x) - halfLen, p.y);\n"
-        -:  173:    "    return length(max(d, vec2(0.0))) + min(max(d.x, d.y), 0.0) - radius;\n"
-        -:  174:    "}\n"
-        -:  175:    "float sdf_blob(vec2 p, float base, float freq, float amp, float seed) {\n"
-        -:  176:    "    float ang = atan(p.y, p.x);\n"
-        -:  177:    "    float wobble = sin(ang * freq + seed) * amp;\n"
-        -:  178:    "    return length(p) - (base + wobble);\n"
-        -:  179:    "}\n"
-        -:  180:    "void main() {\n"
-        -:  181:    "    vec2 p = vLocal;\n"
-        -:  182:    "    float seed = vSeed * 6.2831853;\n"
-        -:  183:    "    float isC = 1.0 - step(0.5, abs(vType - 0.0));\n"
-        -:  184:    "    float isB = 1.0 - step(0.5, abs(vType - 1.0));\n"
-        -:  185:    "    float isV = 1.0 - step(0.5, abs(vType - 2.0));\n"
-        -:  186:    "    float isS = 1.0 - step(0.5, abs(vType - 3.0));\n"
-        -:  187:    "    vec2 pB = vec2(p.x, p.y * 0.8);\n"
-        -:  188:    "    vec2 pV = pB;\n"
-        -:  189:    "    pV.y += 0.35 * sin(pV.x * 1.6 + seed + u_time * 0.6);\n"
-        -:  190:    "    vec2 pS = p;\n"
-        -:  191:    "    pS.y += 0.45 * sin(pS.x * 3.0 + seed + u_time * 0.9);\n"
-        -:  192:    "    pS.x += 0.12 * sin(pS.y * 3.2 + seed * 0.7);\n"
-        -:  193:    "    float angle = atan(p.y, p.x);\n"
-        -:  194:    "    float coccusWobble = 0.08 * sin(angle * 7.0 + seed * 1.8);\n"
-        -:  195:    "    float sdfC = length(p) - (0.95 + coccusWobble);\n"
-        -:  196:    "    float sdfB = sdf_capsule(pB, 0.85, 0.52);\n"
-        -:  197:    "    float sdfV = sdf_capsule(pV, 0.85, 0.5);\n"
-        -:  198:    "    float sdfS = sdf_capsule(pS, 0.9, 0.44);\n"
-        -:  199:    "    float sdf = sdfC * isC + sdfB * isB + sdfV * isV + sdfS * isS;\n"
-        -:  200:    "    float body = smoothstep(0.14, -0.14, sdf);\n"
-        -:  201:    "    vec2 dir = normalize(vec2(cos(seed), sin(seed)) + 0.0001);\n"
-        -:  202:    "    float line = abs(dot(p, vec2(-dir.y, dir.x)));\n"
-        -:  203:    "    float along = dot(p, dir);\n"
-        -:  204:    "    float appendage = smoothstep(0.04, 0.0, line) * smoothstep(1.1, 0.2, along) * (isB + isV) * 0.25;\n"
-        -:  205:    "    float ciliaBands = abs(fract((angle / (2.0 * PI)) * 16.0) - 0.5);\n"
-        -:  206:    "    float cilia = smoothstep(0.22, 0.0, ciliaBands) * smoothstep(0.05, -0.05, sdf) * (isC + isB * 0.5 + isV * 0.5);\n"
-        -:  207:    "    float alpha = max(body, appendage + cilia * 0.22);\n"
-        -:  208:    "    if (alpha <= 0.001) discard;\n"
-        -:  209:    "    float outline = smoothstep(0.11, -0.11, sdf);\n"
-        -:  210:    "    float rim = smoothstep(0.02, -0.02, sdf + 0.08);\n"
-        -:  211:    "    vec3 base = vColor.rgb;\n"
-        -:  212:    "    vec3 fill = mix(base, vec3(1.0), 0.18);\n"
-        -:  213:    "    float dotField = smoothstep(0.24, 0.0, length(fract((p + 1.0) * 5.0) - 0.5));\n"
-        -:  214:    "    float dotMask = step(0.7, hash21(floor((p + 1.0) * 5.0)));\n"
-        -:  215:    "    float stripe = smoothstep(0.1, 0.0, abs(sin(p.x * 5.0 + seed * 1.4))) * isB;\n"
-        -:  216:    "    float zig = smoothstep(0.1, 0.0, abs(sin(p.x * 7.0 + p.y * 2.2 + seed))) * isS;\n"
-        -:  217:    "    float speckle = dotField * dotMask * (isC + isV * 0.6);\n"
-        -:  218:    "    vec3 spotColor = mix(base, vec3(0.98, 0.9, 0.8), 0.55);\n"
-        -:  219:    "    vec3 color = mix(fill, spotColor, speckle * 0.9);\n"
-        -:  220:    "    color = mix(color, base * 0.7, stripe * 0.35 + zig * 0.35);\n"
-        -:  221:    "    vec2 nucPos = vec2(cos(seed * 0.7), sin(seed * 0.9)) * 0.22;\n"
-        -:  222:    "    float nucleus = smoothstep(0.32, 0.0, length(p - nucPos) - 0.18);\n"
-        -:  223:    "    color = mix(color, vec3(0.98, 0.72, 0.9), nucleus * 0.7);\n"
-        -:  224:    "    vec3 outlineColor = base * 0.35;\n"
-        -:  225:    "    color = mix(outlineColor, color, outline);\n"
-        -:  226:    "    color = mix(color, vec3(1.0), rim * 0.08);\n"
-        -:  227:    "    alpha = max(body, appendage + cilia * 0.1);\n"
-        -:  228:    "    fragColor = vec4(color, alpha);\n"
-        -:  229:    "}\n";
-        -:  230:
-function compile_shader called 22 returned 100% blocks executed 95%
-       22:  231:static unsigned int compile_shader(GLenum type, const char *source) {
-        -:  232:#ifdef GPU_SIM_TESTING
-       22:  233:    if (gpu_sim_fail_mode == 1) {
-branch  0 taken 2 (fallthrough)
-branch  1 taken 20
-        2:  234:        source = "invalid shader";
-        -:  235:    }
-        -:  236:#endif
-       22:  237:    unsigned int shader = glCreateShader(type);
-call    0 returned 22
-       22:  238:    if (!shader) {
-branch  0 taken 0 (fallthrough)
-branch  1 taken 22
-    #####:  239:        return 0;
-        -:  240:    }
-       22:  241:    glShaderSource(shader, 1, &source, NULL);
-call    0 returned 22
-       22:  242:    glCompileShader(shader);
-call    0 returned 22
-       22:  243:    GLint compiled = 0;
-       22:  244:    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
-call    0 returned 22
-       22:  245:    if (!compiled) {
-branch  0 taken 2 (fallthrough)
-branch  1 taken 20
-        2:  246:        GLint length = 0;
-        2:  247:        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &length);
-call    0 returned 2
-        2:  248:        if (length > 1) {
-branch  0 taken 2 (fallthrough)
+        7:   27:void gpu_sim_test_set_fail_mode(int mode) {
+        7:   28:    gpu_sim_fail_mode = mode;
+        7:   29:}
+        -:   30:#endif
+        -:   31:
+        -:   32:static const char *kShaderSimInsertName = "sim_insert.comp";
+        -:   33:static const char *kShaderSimCollideName = "sim_collide.comp";
+        -:   34:static const char *kShaderMicrobeVertName = "microbe.vert";
+        -:   35:static const char *kShaderMicrobeFragName = "microbe.frag";
+        -:   36:
+function load_shader_source called 22 returned 100% blocks executed 75%
+       22:   37:static char *load_shader_source(const char *file_name, char *resolved, size_t resolved_size) {
+       22:   38:    const char *roots[] = {"data/shaders", "../data/shaders", "../../data/shaders"};
+        -:   39:    char path[512];
+      22*:   40:    for (size_t i = 0; i < sizeof(roots) / sizeof(roots[0]); ++i) {
+branch  0 taken 22
+branch  1 taken 0 (fallthrough)
+       22:   41:        int written = snprintf(path, sizeof(path), "%s/%s", roots[i], file_name);
+      22*:   42:        if (written <= 0 || (size_t)written >= sizeof(path)) continue;
+branch  0 taken 22 (fallthrough)
 branch  1 taken 0
-        2:  249:            char *log = (char *)malloc((size_t)length);
-        2:  250:            if (log) {
-branch  0 taken 2 (fallthrough)
+branch  2 taken 0 (fallthrough)
+branch  3 taken 22
+       22:   43:        char *text = LoadFileText(path);
+call    0 returned 22
+       22:   44:        if (text) {
+branch  0 taken 22 (fallthrough)
 branch  1 taken 0
-        2:  251:                glGetShaderInfoLog(shader, length, NULL, log);
-call    0 returned 2
-        2:  252:                fprintf(stderr, "shader compile failed: %s\n", log);
-call    0 returned 2
-        2:  253:                free(log);
-        -:  254:            }
-        -:  255:        }
-        2:  256:        glDeleteShader(shader);
-call    0 returned 2
-        2:  257:        return 0;
-        -:  258:    }
-       20:  259:    return shader;
-        -:  260:}
-        -:  261:
-function link_program called 20 returned 100% blocks executed 76%
-       20:  262:static unsigned int link_program(unsigned int shader) {
-       20:  263:    unsigned int program = glCreateProgram();
-call    0 returned 20
-       20:  264:    if (!program) {
-branch  0 taken 0 (fallthrough)
-branch  1 taken 20
-    #####:  265:        return 0;
-        -:  266:    }
-       20:  267:    if (shader) {
+       22:   45:            if (resolved && resolved_size > 0) {
+branch  0 taken 22 (fallthrough)
+branch  1 taken 0
+branch  2 taken 22 (fallthrough)
+branch  3 taken 0
+       22:   46:                snprintf(resolved, resolved_size, "%s", path);
+        -:   47:            }
+       22:   48:            return text;
+        -:   49:        }
+        -:   50:    }
+    #####:   51:    fprintf(stderr, "failed to load shader file: %s\n", file_name);
+call    0 never executed
+    #####:   52:    return NULL;
+        -:   53:}
+        -:   54:
+function resolve_shader_path called 20 returned 100% blocks executed 75%
+       20:   55:static bool resolve_shader_path(const char *file_name, char *resolved, size_t resolved_size) {
+       20:   56:    const char *roots[] = {"data/shaders", "../data/shaders", "../../data/shaders"};
+        -:   57:    char path[512];
+      20*:   58:    for (size_t i = 0; i < sizeof(roots) / sizeof(roots[0]); ++i) {
+branch  0 taken 20
+branch  1 taken 0 (fallthrough)
+       20:   59:        int written = snprintf(path, sizeof(path), "%s/%s", roots[i], file_name);
+      20*:   60:        if (written <= 0 || (size_t)written >= sizeof(path)) continue;
 branch  0 taken 20 (fallthrough)
 branch  1 taken 0
-       20:  268:        glAttachShader(program, shader);
+branch  2 taken 0 (fallthrough)
+branch  3 taken 20
+       20:   61:        if (FileExists(path)) {
 call    0 returned 20
-        -:  269:    }
-       20:  270:    glLinkProgram(program);
-call    0 returned 20
-       20:  271:    GLint linked = 0;
-       20:  272:    glGetProgramiv(program, GL_LINK_STATUS, &linked);
-call    0 returned 20
-        -:  273:#ifdef GPU_SIM_TESTING
-       20:  274:    if (gpu_sim_fail_mode == 2) {
+branch  1 taken 20 (fallthrough)
+branch  2 taken 0
+       20:   62:            if (resolved && resolved_size > 0) {
+branch  0 taken 20 (fallthrough)
+branch  1 taken 0
+branch  2 taken 20 (fallthrough)
+branch  3 taken 0
+       20:   63:                snprintf(resolved, resolved_size, "%s", path);
+        -:   64:            }
+       20:   65:            return true;
+        -:   66:        }
+        -:   67:    }
+    #####:   68:    fprintf(stderr, "shader path not found: %s\n", file_name);
+call    0 never executed
+    #####:   69:    return false;
+        -:   70:}
+        -:   71:
+function compile_shader_from_file called 22 returned 100% blocks executed 78%
+       22:   72:static unsigned int compile_shader_from_file(GLenum type, const char *file_name) {
+       22:   73:    char resolved[512] = {0};
+       22:   74:    bool from_file = true;
+       22:   75:    char *source = load_shader_source(file_name, resolved, sizeof(resolved));
+call    0 returned 22
+        -:   76:#ifdef GPU_SIM_TESTING
+       22:   77:    if (gpu_sim_fail_mode == 1) {
 branch  0 taken 2 (fallthrough)
-branch  1 taken 18
-        2:  275:        linked = 0;
-        -:  276:    }
-        -:  277:#endif
-       20:  278:    if (!linked) {
+branch  1 taken 20
+        2:   78:        if (source) UnloadFileText(source);
 branch  0 taken 2 (fallthrough)
-branch  1 taken 18
-        2:  279:        GLint length = 0;
-        2:  280:        glGetProgramiv(program, GL_INFO_LOG_LENGTH, &length);
-call    0 returned 2
-        2:  281:        if (length > 1) {
+branch  1 taken 0
+call    2 returned 2
+        2:   79:        source = strdup("invalid shader");
+        2:   80:        from_file = false;
+        -:   81:    }
+        -:   82:#endif
+       22:   83:    if (!source) {
 branch  0 taken 0 (fallthrough)
-branch  1 taken 2
-    #####:  282:            char *log = (char *)malloc((size_t)length);
-    #####:  283:            if (log) {
+branch  1 taken 22
+    #####:   84:        return 0;
+        -:   85:    }
+       22:   86:    unsigned int shader = glCreateShader(type);
+call    0 returned 22
+       22:   87:    if (!shader) {
+branch  0 taken 0 (fallthrough)
+branch  1 taken 22
+    #####:   88:        if (from_file) UnloadFileText(source); else free(source);
 branch  0 never executed
 branch  1 never executed
-    #####:  284:                glGetProgramInfoLog(program, length, NULL, log);
-call    0 never executed
-    #####:  285:                fprintf(stderr, "program link failed: %s\n", log);
-call    0 never executed
-    #####:  286:                free(log);
-        -:  287:            }
-        -:  288:        }
-        2:  289:        glDeleteProgram(program);
+call    2 never executed
+    #####:   89:        return 0;
+        -:   90:    }
+       22:   91:    const char *src_ptr = source;
+       22:   92:    glShaderSource(shader, 1, &src_ptr, NULL);
+call    0 returned 22
+       22:   93:    glCompileShader(shader);
+call    0 returned 22
+       22:   94:    GLint compiled = 0;
+       22:   95:    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+call    0 returned 22
+       22:   96:    if (!compiled) {
+branch  0 taken 2 (fallthrough)
+branch  1 taken 20
+        2:   97:        GLint length = 0;
+        2:   98:        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &length);
 call    0 returned 2
-        2:  290:        return 0;
-        -:  291:    }
-       18:  292:    return program;
-        -:  293:}
-        -:  294:
+        2:   99:        if (length > 1) {
+branch  0 taken 2 (fallthrough)
+branch  1 taken 0
+        2:  100:            char *log = (char *)malloc((size_t)length);
+        2:  101:            if (log) {
+branch  0 taken 2 (fallthrough)
+branch  1 taken 0
+        2:  102:                glGetShaderInfoLog(shader, length, NULL, log);
+call    0 returned 2
+       2*:  103:                fprintf(stderr, "shader compile failed (%s): %s\n", resolved[0] ? resolved : file_name, log);
+branch  0 taken 2 (fallthrough)
+branch  1 taken 0
+call    2 returned 2
+        2:  104:                free(log);
+        -:  105:            }
+        -:  106:        }
+        2:  107:        glDeleteShader(shader);
+call    0 returned 2
+       2*:  108:        if (from_file) UnloadFileText(source); else free(source);
+branch  0 taken 0 (fallthrough)
+branch  1 taken 2
+call    2 never executed
+        2:  109:        return 0;
+        -:  110:    }
+      20*:  111:    if (from_file) UnloadFileText(source); else free(source);
+branch  0 taken 20 (fallthrough)
+branch  1 taken 0
+call    2 returned 20
+       20:  112:    return shader;
+        -:  113:}
+        -:  114:
+        -:  115:
+function link_program called 20 returned 100% blocks executed 76%
+       20:  116:static unsigned int link_program(unsigned int shader) {
+       20:  117:    unsigned int program = glCreateProgram();
+call    0 returned 20
+       20:  118:    if (!program) {
+branch  0 taken 0 (fallthrough)
+branch  1 taken 20
+    #####:  119:        return 0;
+        -:  120:    }
+       20:  121:    if (shader) {
+branch  0 taken 20 (fallthrough)
+branch  1 taken 0
+       20:  122:        glAttachShader(program, shader);
+call    0 returned 20
+        -:  123:    }
+       20:  124:    glLinkProgram(program);
+call    0 returned 20
+       20:  125:    GLint linked = 0;
+       20:  126:    glGetProgramiv(program, GL_LINK_STATUS, &linked);
+call    0 returned 20
+        -:  127:#ifdef GPU_SIM_TESTING
+       20:  128:    if (gpu_sim_fail_mode == 2) {
+branch  0 taken 2 (fallthrough)
+branch  1 taken 18
+        2:  129:        linked = 0;
+        -:  130:    }
+        -:  131:#endif
+       20:  132:    if (!linked) {
+branch  0 taken 2 (fallthrough)
+branch  1 taken 18
+        2:  133:        GLint length = 0;
+        2:  134:        glGetProgramiv(program, GL_INFO_LOG_LENGTH, &length);
+call    0 returned 2
+        2:  135:        if (length > 1) {
+branch  0 taken 0 (fallthrough)
+branch  1 taken 2
+    #####:  136:            char *log = (char *)malloc((size_t)length);
+    #####:  137:            if (log) {
+branch  0 never executed
+branch  1 never executed
+    #####:  138:                glGetProgramInfoLog(program, length, NULL, log);
+call    0 never executed
+    #####:  139:                fprintf(stderr, "program link failed: %s\n", log);
+call    0 never executed
+    #####:  140:                free(log);
+        -:  141:            }
+        -:  142:        }
+        2:  143:        glDeleteProgram(program);
+call    0 returned 2
+        2:  144:        return 0;
+        -:  145:    }
+       18:  146:    return program;
+        -:  147:}
+        -:  148:
 function init_quad called 9 returned 100% blocks executed 100%
-        9:  295:static void init_quad(GpuSim *sim) {
-        9:  296:    float verts[] = {
-        -:  297:        -0.5f, 0.0f, -0.5f,
-        -:  298:         0.5f, 0.0f, -0.5f,
-        -:  299:         0.5f, 0.0f,  0.5f,
-        -:  300:        -0.5f, 0.0f,  0.5f
-        -:  301:    };
-        9:  302:    unsigned short indices[] = {0, 1, 2, 2, 3, 0};
-        -:  303:
-        9:  304:    glGenVertexArrays(1, &sim->vao);
+        9:  149:static void init_quad(GpuSim *sim) {
+        9:  150:    float verts[] = {
+        -:  151:        -0.5f, 0.0f, -0.5f,
+        -:  152:         0.5f, 0.0f, -0.5f,
+        -:  153:         0.5f, 0.0f,  0.5f,
+        -:  154:        -0.5f, 0.0f,  0.5f
+        -:  155:    };
+        9:  156:    unsigned short indices[] = {0, 1, 2, 2, 3, 0};
+        -:  157:
+        9:  158:    glGenVertexArrays(1, &sim->vao);
 call    0 returned 9
-        9:  305:    glBindVertexArray(sim->vao);
+        9:  159:    glBindVertexArray(sim->vao);
 call    0 returned 9
-        -:  306:
-        9:  307:    glGenBuffers(1, &sim->vbo);
+        -:  160:
+        9:  161:    glGenBuffers(1, &sim->vbo);
 call    0 returned 9
-        9:  308:    glBindBuffer(GL_ARRAY_BUFFER, sim->vbo);
+        9:  162:    glBindBuffer(GL_ARRAY_BUFFER, sim->vbo);
 call    0 returned 9
-        9:  309:    glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STATIC_DRAW);
+        9:  163:    glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STATIC_DRAW);
 call    0 returned 9
-        -:  310:
-        9:  311:    glGenBuffers(1, &sim->ebo);
+        -:  164:
+        9:  165:    glGenBuffers(1, &sim->ebo);
 call    0 returned 9
-        9:  312:    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sim->ebo);
+        9:  166:    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sim->ebo);
 call    0 returned 9
-        9:  313:    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+        9:  167:    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 call    0 returned 9
-        -:  314:
-        9:  315:    glEnableVertexAttribArray(0);
+        -:  168:
+        9:  169:    glEnableVertexAttribArray(0);
 call    0 returned 9
-        9:  316:    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+        9:  170:    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
 call    0 returned 9
-        -:  317:
-        9:  318:    glBindVertexArray(0);
+        -:  171:
+        9:  172:    glBindVertexArray(0);
 call    0 returned 9
-        -:  319:
-        9:  320:    sim->indices_count = 6;
-        9:  321:}
-        -:  322:
+        -:  173:
+        9:  174:    sim->indices_count = 6;
+        9:  175:}
+        -:  176:
 function init_entities called 9 returned 100% blocks executed 100%
-        9:  323:static bool init_entities(GpuSim *sim, int count) {
-        9:  324:    GpuEntity *entities = NULL;
-        -:  325:#ifdef GPU_SIM_TESTING
-        9:  326:    if (gpu_sim_fail_mode != 3) {
+        9:  177:static bool init_entities(GpuSim *sim, int count) {
+        9:  178:    GpuEntity *entities = NULL;
+        -:  179:#ifdef GPU_SIM_TESTING
+        9:  180:    if (gpu_sim_fail_mode != 3) {
 branch  0 taken 8 (fallthrough)
 branch  1 taken 1
-        8:  327:        entities = (GpuEntity *)malloc(sizeof(GpuEntity) * (size_t)count);
-        -:  328:    }
-        -:  329:#else
-        -:  330:    entities = (GpuEntity *)malloc(sizeof(GpuEntity) * (size_t)count);
-        -:  331:#endif
-        9:  332:    if (!entities) {
+        8:  181:        entities = (GpuEntity *)malloc(sizeof(GpuEntity) * (size_t)count);
+        -:  182:    }
+        -:  183:#else
+        -:  184:    entities = (GpuEntity *)malloc(sizeof(GpuEntity) * (size_t)count);
+        -:  185:#endif
+        9:  186:    if (!entities) {
 branch  0 taken 1 (fallthrough)
 branch  1 taken 8
-        1:  333:        return false;
-        -:  334:    }
-        -:  335:
-  1041046:  336:    for (int i = 0; i < count; ++i) {
+        1:  187:        return false;
+        -:  188:    }
+        -:  189:
+  1041046:  190:    for (int i = 0; i < count; ++i) {
 branch  0 taken 1041038
 branch  1 taken 8 (fallthrough)
-  1041038:  337:        uint32_t seed = (uint32_t)(i + 1) * 2654435761u;
-  1041038:  338:        seed ^= seed >> 16;
-  1041038:  339:        float r1 = (float)(seed & 0xFFFFu) / 65535.0f;
-  1041038:  340:        seed = seed * 2246822519u + 3266489917u;
-  1041038:  341:        float r2 = (float)(seed & 0xFFFFu) / 65535.0f;
-  1041038:  342:        seed = seed * 3266489917u + 668265263u;
-  1041038:  343:        float r3 = (float)(seed & 0xFFFFu) / 65535.0f;
-  1041038:  344:        int type = (int)(seed % 4u);
-  1041038:  345:        float px = ((float)(i % 1000) / 1000.0f - 0.5f) * 24.0f;
-  1041038:  346:        float pz = ((float)(i / 1000) / 1000.0f - 0.5f) * 20.0f;
-  1041038:  347:        entities[i].pos[0] = px;
-  1041038:  348:        entities[i].pos[1] = 0.0f;
-  1041038:  349:        entities[i].pos[2] = pz;
-  1041038:  350:        entities[i].pos[3] = 1.0f;
-  1041038:  351:        entities[i].vel[0] = (r1 - 0.5f) * 0.3f;
-  1041038:  352:        entities[i].vel[1] = 0.0f;
-  1041038:  353:        entities[i].vel[2] = (r2 - 0.5f) * 0.3f;
-  1041038:  354:        entities[i].vel[3] = 0.0f;
-  1041038:  355:        switch (type) {
+  1041038:  191:        uint32_t seed = (uint32_t)(i + 1) * 2654435761u;
+  1041038:  192:        seed ^= seed >> 16;
+  1041038:  193:        float r1 = (float)(seed & 0xFFFFu) / 65535.0f;
+  1041038:  194:        seed = seed * 2246822519u + 3266489917u;
+  1041038:  195:        float r2 = (float)(seed & 0xFFFFu) / 65535.0f;
+  1041038:  196:        seed = seed * 3266489917u + 668265263u;
+  1041038:  197:        float r3 = (float)(seed & 0xFFFFu) / 65535.0f;
+  1041038:  198:        int type = (int)(seed % 4u);
+  1041038:  199:        float px = ((float)(i % 1000) / 1000.0f - 0.5f) * 24.0f;
+  1041038:  200:        float pz = ((float)(i / 1000) / 1000.0f - 0.5f) * 20.0f;
+  1041038:  201:        entities[i].pos[0] = px;
+  1041038:  202:        entities[i].pos[1] = 0.0f;
+  1041038:  203:        entities[i].pos[2] = pz;
+  1041038:  204:        entities[i].pos[3] = 1.0f;
+  1041038:  205:        entities[i].vel[0] = (r1 - 0.5f) * 0.3f;
+  1041038:  206:        entities[i].vel[1] = 0.0f;
+  1041038:  207:        entities[i].vel[2] = (r2 - 0.5f) * 0.3f;
+  1041038:  208:        entities[i].vel[3] = 0.0f;
+  1041038:  209:        switch (type) {
 branch  0 taken 260261
 branch  1 taken 260253
 branch  2 taken 260263
 branch  3 taken 260261
-   260261:  356:            case 0:
-   260261:  357:                entities[i].color[0] = 0.26f;
-   260261:  358:                entities[i].color[1] = 0.76f;
-   260261:  359:                entities[i].color[2] = 0.36f;
-   260261:  360:                break;
-   260253:  361:            case 1:
-   260253:  362:                entities[i].color[0] = 0.18f;
-   260253:  363:                entities[i].color[1] = 0.56f;
-   260253:  364:                entities[i].color[2] = 0.78f;
-   260253:  365:                break;
-   260263:  366:            case 2:
-   260263:  367:                entities[i].color[0] = 0.96f;
-   260263:  368:                entities[i].color[1] = 0.72f;
-   260263:  369:                entities[i].color[2] = 0.18f;
-   260263:  370:                break;
-   260261:  371:            default:
-   260261:  372:                entities[i].color[0] = 0.78f;
-   260261:  373:                entities[i].color[1] = 0.28f;
-   260261:  374:                entities[i].color[2] = 0.76f;
-   260261:  375:                break;
-        -:  376:        }
-  1041038:  377:        entities[i].color[0] += (r3 - 0.5f) * 0.12f;
-  1041038:  378:        entities[i].color[1] += (r1 - 0.5f) * 0.12f;
-  1041038:  379:        entities[i].color[2] += (r2 - 0.5f) * 0.12f;
-  1041038:  380:        entities[i].color[3] = 0.55f;
-  1041038:  381:        entities[i].params[0] = 0.9f + r3 * 1.25f;
-  1041038:  382:        entities[i].params[1] = 0.0f;
-  1041038:  383:        entities[i].params[2] = (float)type;
-  1041038:  384:        entities[i].params[3] = r2;
-        -:  385:    }
-        -:  386:
-        8:  387:    glGenBuffers(1, &sim->ssbo);
+   260261:  210:            case 0:
+   260261:  211:                entities[i].color[0] = 0.26f;
+   260261:  212:                entities[i].color[1] = 0.76f;
+   260261:  213:                entities[i].color[2] = 0.36f;
+   260261:  214:                break;
+   260253:  215:            case 1:
+   260253:  216:                entities[i].color[0] = 0.18f;
+   260253:  217:                entities[i].color[1] = 0.56f;
+   260253:  218:                entities[i].color[2] = 0.78f;
+   260253:  219:                break;
+   260263:  220:            case 2:
+   260263:  221:                entities[i].color[0] = 0.96f;
+   260263:  222:                entities[i].color[1] = 0.72f;
+   260263:  223:                entities[i].color[2] = 0.18f;
+   260263:  224:                break;
+   260261:  225:            default:
+   260261:  226:                entities[i].color[0] = 0.78f;
+   260261:  227:                entities[i].color[1] = 0.28f;
+   260261:  228:                entities[i].color[2] = 0.76f;
+   260261:  229:                break;
+        -:  230:        }
+  1041038:  231:        entities[i].color[0] += (r3 - 0.5f) * 0.12f;
+  1041038:  232:        entities[i].color[1] += (r1 - 0.5f) * 0.12f;
+  1041038:  233:        entities[i].color[2] += (r2 - 0.5f) * 0.12f;
+  1041038:  234:        entities[i].color[3] = 0.55f;
+  1041038:  235:        entities[i].params[0] = 0.9f + r3 * 1.25f;
+  1041038:  236:        entities[i].params[1] = 0.0f;
+  1041038:  237:        entities[i].params[2] = (float)type;
+  1041038:  238:        entities[i].params[3] = r2;
+        -:  239:    }
+        -:  240:
+        8:  241:    glGenBuffers(1, &sim->ssbo);
 call    0 returned 8
-        8:  388:    glBindBuffer(GL_SHADER_STORAGE_BUFFER, sim->ssbo);
+        8:  242:    glBindBuffer(GL_SHADER_STORAGE_BUFFER, sim->ssbo);
 call    0 returned 8
-        8:  389:    glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(GpuEntity) * (size_t)count, entities, GL_DYNAMIC_DRAW);
+        8:  243:    glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(GpuEntity) * (size_t)count, entities, GL_DYNAMIC_DRAW);
 call    0 returned 8
-        8:  390:    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, sim->ssbo);
+        8:  244:    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, sim->ssbo);
 call    0 returned 8
-        8:  391:    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+        8:  245:    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 call    0 returned 8
-        -:  392:
-        8:  393:    glGenBuffers(1, &sim->ssbo_head);
+        -:  246:
+        8:  247:    glGenBuffers(1, &sim->ssbo_head);
 call    0 returned 8
-        8:  394:    glBindBuffer(GL_SHADER_STORAGE_BUFFER, sim->ssbo_head);
+        8:  248:    glBindBuffer(GL_SHADER_STORAGE_BUFFER, sim->ssbo_head);
 call    0 returned 8
-        8:  395:    glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(int) * GRID_CELLS, NULL, GL_DYNAMIC_DRAW);
+        8:  249:    glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(int) * GRID_CELLS, NULL, GL_DYNAMIC_DRAW);
 call    0 returned 8
-        8:  396:    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, sim->ssbo_head);
+        8:  250:    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, sim->ssbo_head);
 call    0 returned 8
-        -:  397:
-        8:  398:    glGenBuffers(1, &sim->ssbo_next);
+        -:  251:
+        8:  252:    glGenBuffers(1, &sim->ssbo_next);
 call    0 returned 8
-        8:  399:    glBindBuffer(GL_SHADER_STORAGE_BUFFER, sim->ssbo_next);
+        8:  253:    glBindBuffer(GL_SHADER_STORAGE_BUFFER, sim->ssbo_next);
 call    0 returned 8
-        8:  400:    glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(int) * (size_t)count, NULL, GL_DYNAMIC_DRAW);
+        8:  254:    glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(int) * (size_t)count, NULL, GL_DYNAMIC_DRAW);
 call    0 returned 8
-        8:  401:    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, sim->ssbo_next);
+        8:  255:    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, sim->ssbo_next);
 call    0 returned 8
-        8:  402:    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+        8:  256:    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 call    0 returned 8
-        -:  403:
-        8:  404:    free(entities);
-        8:  405:    return true;
-        -:  406:}
-        -:  407:
+        -:  257:
+        8:  258:    free(entities);
+        8:  259:    return true;
+        -:  260:}
+        -:  261:
 function validate_gpu_sim_limits called 13 returned 100% blocks executed 88%
-       13:  408:static bool validate_gpu_sim_limits(int count) {
-       13:  409:    GLint max_storage = 0;
-       13:  410:    GLint max_ssbo = 0;
-       13:  411:    glGetIntegerv(GL_MAX_SHADER_STORAGE_BLOCK_SIZE, &max_storage);
+       13:  262:static bool validate_gpu_sim_limits(int count) {
+       13:  263:    GLint max_storage = 0;
+       13:  264:    GLint max_ssbo = 0;
+       13:  265:    glGetIntegerv(GL_MAX_SHADER_STORAGE_BLOCK_SIZE, &max_storage);
 call    0 returned 13
-       13:  412:    glGetIntegerv(GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS, &max_ssbo);
+       13:  266:    glGetIntegerv(GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS, &max_ssbo);
 call    0 returned 13
-       13:  413:    if (max_storage <= 0 || max_ssbo < 3) {
+       13:  267:    if (max_storage <= 0 || max_ssbo < 3) {
 branch  0 taken 13 (fallthrough)
 branch  1 taken 0
 branch  2 taken 0 (fallthrough)
 branch  3 taken 13
-    #####:  414:        return false;
-        -:  415:    }
-       13:  416:    size_t bytes = sizeof(GpuEntity) * (size_t)count;
-       13:  417:    return bytes <= (size_t)max_storage;
-        -:  418:}
-        -:  419:
-function gpu_sim_init called 13 returned 100% blocks executed 95%
-       13:  420:bool gpu_sim_init(GpuSim *sim, int entity_count) {
-       13:  421:    memset(sim, 0, sizeof(*sim));
-       13:  422:    sim->entity_count = entity_count;
-       13:  423:    sim->active_count = entity_count;
-        -:  424:
-       13:  425:    if (!gpu_sim_supported()) {
+    #####:  268:        return false;
+        -:  269:    }
+       13:  270:    size_t bytes = sizeof(GpuEntity) * (size_t)count;
+       13:  271:    return bytes <= (size_t)max_storage;
+        -:  272:}
+        -:  273:
+function gpu_sim_init called 13 returned 100% blocks executed 91%
+       13:  274:bool gpu_sim_init(GpuSim *sim, int entity_count) {
+       13:  275:    memset(sim, 0, sizeof(*sim));
+       13:  276:    sim->entity_count = entity_count;
+       13:  277:    sim->active_count = entity_count;
+        -:  278:
+       13:  279:    if (!gpu_sim_supported()) {
 call    0 returned 13
 branch  1 taken 0 (fallthrough)
 branch  2 taken 13
-    #####:  426:        return false;
-        -:  427:    }
-       13:  428:    if (!validate_gpu_sim_limits(entity_count)) {
+    #####:  280:        return false;
+        -:  281:    }
+       13:  282:    if (!validate_gpu_sim_limits(entity_count)) {
 call    0 returned 13
 branch  1 taken 1 (fallthrough)
 branch  2 taken 12
-        1:  429:        return false;
-        -:  430:    }
-        -:  431:
-       12:  432:    unsigned int cs_insert = compile_shader(GL_COMPUTE_SHADER, kComputeInsertShader);
+        1:  283:        return false;
+        -:  284:    }
+        -:  285:
+       12:  286:    unsigned int cs_insert = compile_shader_from_file(GL_COMPUTE_SHADER, kShaderSimInsertName);
 call    0 returned 12
-       12:  433:    if (cs_insert == 0) return false;
+       12:  287:    if (cs_insert == 0) return false;
 branch  0 taken 2 (fallthrough)
 branch  1 taken 10
-       10:  434:    sim->sim_insert_program = link_program(cs_insert);
+       10:  288:    sim->sim_insert_program = link_program(cs_insert);
 call    0 returned 10
-       10:  435:    glDeleteShader(cs_insert);
+       10:  289:    glDeleteShader(cs_insert);
 call    0 returned 10
-        -:  436:
-       10:  437:    unsigned int cs_collide = compile_shader(GL_COMPUTE_SHADER, kComputeCollideShader);
+        -:  290:
+       10:  291:    unsigned int cs_collide = compile_shader_from_file(GL_COMPUTE_SHADER, kShaderSimCollideName);
 call    0 returned 10
-      10*:  438:    if (cs_collide == 0) return false;
+      10*:  292:    if (cs_collide == 0) return false;
 branch  0 taken 0 (fallthrough)
 branch  1 taken 10
-       10:  439:    sim->sim_collide_program = link_program(cs_collide);
+       10:  293:    sim->sim_collide_program = link_program(cs_collide);
 call    0 returned 10
-       10:  440:    glDeleteShader(cs_collide);
+       10:  294:    glDeleteShader(cs_collide);
 call    0 returned 10
-        -:  441:
-       10:  442:    sim->render_shader = LoadShaderFromMemory(kVertexShader, kFragmentShader);
+        -:  295:
+       10:  296:    char vert_path[512] = {0};
+       10:  297:    char frag_path[512] = {0};
+      10*:  298:    if (!resolve_shader_path(kShaderMicrobeVertName, vert_path, sizeof(vert_path))) return false;
 call    0 returned 10
-       10:  443:    if (sim->sim_insert_program == 0 || sim->sim_collide_program == 0 || sim->render_shader.id == 0) return false;
+branch  1 taken 0 (fallthrough)
+branch  2 taken 10
+      10*:  299:    if (!resolve_shader_path(kShaderMicrobeFragName, frag_path, sizeof(frag_path))) return false;
+call    0 returned 10
+branch  1 taken 0 (fallthrough)
+branch  2 taken 10
+       10:  300:    sim->render_shader = LoadShader(vert_path, frag_path);
+call    0 returned 10
+       10:  301:    if (sim->sim_insert_program == 0 || sim->sim_collide_program == 0 || sim->render_shader.id == 0) return false;
 branch  0 taken 9 (fallthrough)
 branch  1 taken 1
 branch  2 taken 9 (fallthrough)
 branch  3 taken 0
 branch  4 taken 0 (fallthrough)
 branch  5 taken 9
-        -:  444:
-        9:  445:    sim->loc_vp = GetShaderLocation(sim->render_shader, "u_vp");
+        -:  302:
+        9:  303:    sim->loc_vp = GetShaderLocation(sim->render_shader, "u_vp");
 call    0 returned 9
-        -:  446:#ifdef GPU_SIM_TESTING
-        9:  447:    if (gpu_sim_fail_mode == 4) {
+        -:  304:#ifdef GPU_SIM_TESTING
+        9:  305:    if (gpu_sim_fail_mode == 4) {
 branch  0 taken 1 (fallthrough)
 branch  1 taken 8
-        1:  448:        sim->loc_vp = -1;
-        -:  449:    }
-        -:  450:#endif
-        9:  451:    if (sim->loc_vp < 0) {
+        1:  306:        sim->loc_vp = -1;
+        -:  307:    }
+        -:  308:#endif
+        9:  309:    if (sim->loc_vp < 0) {
 branch  0 taken 1 (fallthrough)
 branch  1 taken 8
-        1:  452:        sim->loc_vp = 0;
-        -:  453:    }
-        9:  454:    sim->loc_bounds = rlGetLocationUniform(sim->sim_collide_program, "u_bounds");
+        1:  310:        sim->loc_vp = 0;
+        -:  311:    }
+        9:  312:    sim->loc_bounds = rlGetLocationUniform(sim->sim_collide_program, "u_bounds");
 call    0 returned 9
-        9:  455:    sim->loc_dt = rlGetLocationUniform(sim->sim_collide_program, "u_dt");
+        9:  313:    sim->loc_dt = rlGetLocationUniform(sim->sim_collide_program, "u_dt");
 call    0 returned 9
-        9:  456:    sim->loc_grid_dim = rlGetLocationUniform(sim->sim_collide_program, "u_grid_dim");
+        9:  314:    sim->loc_grid_dim = rlGetLocationUniform(sim->sim_collide_program, "u_grid_dim");
 call    0 returned 9
-        9:  457:    sim->loc_cell = rlGetLocationUniform(sim->sim_collide_program, "u_cell");
+        9:  315:    sim->loc_cell = rlGetLocationUniform(sim->sim_collide_program, "u_cell");
 call    0 returned 9
-        9:  458:    sim->loc_active_insert = glGetUniformLocation(sim->sim_insert_program, "u_active");
+        9:  316:    sim->loc_active_insert = glGetUniformLocation(sim->sim_insert_program, "u_active");
 call    0 returned 9
-        9:  459:    sim->loc_active_collide = glGetUniformLocation(sim->sim_collide_program, "u_active");
+        9:  317:    sim->loc_active_collide = glGetUniformLocation(sim->sim_collide_program, "u_active");
 call    0 returned 9
-        9:  460:    sim->loc_time = GetShaderLocation(sim->render_shader, "u_time");
+        9:  318:    sim->loc_time = GetShaderLocation(sim->render_shader, "u_time");
 call    0 returned 9
-        -:  461:
-        9:  462:    init_quad(sim);
+        -:  319:
+        9:  320:    init_quad(sim);
 call    0 returned 9
-        9:  463:    if (!init_entities(sim, entity_count)) {
+        9:  321:    if (!init_entities(sim, entity_count)) {
 call    0 returned 9
 branch  1 taken 1 (fallthrough)
 branch  2 taken 8
-        1:  464:        return false;
-        -:  465:    }
-        8:  466:    sim->ready = true;
-        8:  467:    return true;
-        -:  468:}
-        -:  469:
+        1:  322:        return false;
+        -:  323:    }
+        8:  324:    sim->ready = true;
+        8:  325:    return true;
+        -:  326:}
+        -:  327:
 function gpu_sim_shutdown called 8 returned 100% blocks executed 95%
-        8:  470:void gpu_sim_shutdown(GpuSim *sim) {
-       8*:  471:    if (!sim->ready) return;
+        8:  328:void gpu_sim_shutdown(GpuSim *sim) {
+       8*:  329:    if (!sim->ready) return;
 branch  0 taken 0 (fallthrough)
 branch  1 taken 8
-        8:  472:    if (sim->ssbo) glDeleteBuffers(1, &sim->ssbo);
+        8:  330:    if (sim->ssbo) glDeleteBuffers(1, &sim->ssbo);
 branch  0 taken 8 (fallthrough)
 branch  1 taken 0
 call    2 returned 8
-        8:  473:    if (sim->ssbo_head) glDeleteBuffers(1, &sim->ssbo_head);
+        8:  331:    if (sim->ssbo_head) glDeleteBuffers(1, &sim->ssbo_head);
 branch  0 taken 8 (fallthrough)
 branch  1 taken 0
 call    2 returned 8
-        8:  474:    if (sim->ssbo_next) glDeleteBuffers(1, &sim->ssbo_next);
+        8:  332:    if (sim->ssbo_next) glDeleteBuffers(1, &sim->ssbo_next);
 branch  0 taken 8 (fallthrough)
 branch  1 taken 0
 call    2 returned 8
-        8:  475:    if (sim->vbo) glDeleteBuffers(1, &sim->vbo);
+        8:  333:    if (sim->vbo) glDeleteBuffers(1, &sim->vbo);
 branch  0 taken 8 (fallthrough)
 branch  1 taken 0
 call    2 returned 8
-        8:  476:    if (sim->ebo) glDeleteBuffers(1, &sim->ebo);
+        8:  334:    if (sim->ebo) glDeleteBuffers(1, &sim->ebo);
 branch  0 taken 8 (fallthrough)
 branch  1 taken 0
 call    2 returned 8
-        8:  477:    if (sim->vao) glDeleteVertexArrays(1, &sim->vao);
+        8:  335:    if (sim->vao) glDeleteVertexArrays(1, &sim->vao);
 branch  0 taken 8 (fallthrough)
 branch  1 taken 0
 call    2 returned 8
-        8:  478:    if (sim->render_shader.id) UnloadShader(sim->render_shader);
+        8:  336:    if (sim->render_shader.id) UnloadShader(sim->render_shader);
 branch  0 taken 8 (fallthrough)
 branch  1 taken 0
 call    2 returned 8
-        8:  479:    if (sim->sim_insert_program) glDeleteProgram(sim->sim_insert_program);
+        8:  337:    if (sim->sim_insert_program) glDeleteProgram(sim->sim_insert_program);
 branch  0 taken 8 (fallthrough)
 branch  1 taken 0
 call    2 returned 8
-        8:  480:    if (sim->sim_collide_program) glDeleteProgram(sim->sim_collide_program);
+        8:  338:    if (sim->sim_collide_program) glDeleteProgram(sim->sim_collide_program);
 branch  0 taken 8 (fallthrough)
 branch  1 taken 0
 call    2 returned 8
-        8:  481:    memset(sim, 0, sizeof(*sim));
-        -:  482:}
-        -:  483:
+        8:  339:    memset(sim, 0, sizeof(*sim));
+        -:  340:}
+        -:  341:
 function gpu_sim_update called 8 returned 100% blocks executed 97%
-        8:  484:void gpu_sim_update(GpuSim *sim, float dt, Vector2 bounds) {
-       8*:  485:    if (!sim->ready) return;
+        8:  342:void gpu_sim_update(GpuSim *sim, float dt, Vector2 bounds) {
+       8*:  343:    if (!sim->ready) return;
 branch  0 taken 0 (fallthrough)
 branch  1 taken 8
-        8:  486:    rlDrawRenderBatchActive();
+        8:  344:    rlDrawRenderBatchActive();
 call    0 returned 8
-        -:  487:
-        8:  488:    float cell = (bounds.x * 2.0f) / (float)GRID_W;
-        8:  489:    int grid_dim[2] = {GRID_W, GRID_H};
-        8:  490:    int clear = -1;
-        8:  491:    glBindBuffer(GL_SHADER_STORAGE_BUFFER, sim->ssbo_head);
+        -:  345:
+        8:  346:    float cell = (bounds.x * 2.0f) / (float)GRID_W;
+        8:  347:    int grid_dim[2] = {GRID_W, GRID_H};
+        8:  348:    int clear = -1;
+        8:  349:    glBindBuffer(GL_SHADER_STORAGE_BUFFER, sim->ssbo_head);
 call    0 returned 8
-        8:  492:    glClearBufferData(GL_SHADER_STORAGE_BUFFER, GL_R32I, GL_RED_INTEGER, GL_INT, &clear);
+        8:  350:    glClearBufferData(GL_SHADER_STORAGE_BUFFER, GL_R32I, GL_RED_INTEGER, GL_INT, &clear);
 call    0 returned 8
-        -:  493:
-        8:  494:    glUseProgram(sim->sim_insert_program);
+        -:  351:
+        8:  352:    glUseProgram(sim->sim_insert_program);
 call    0 returned 8
-        8:  495:    int loc_bounds = rlGetLocationUniform(sim->sim_insert_program, "u_bounds");
+        8:  353:    int loc_bounds = rlGetLocationUniform(sim->sim_insert_program, "u_bounds");
 call    0 returned 8
-        8:  496:    int loc_cell = rlGetLocationUniform(sim->sim_insert_program, "u_cell");
+        8:  354:    int loc_cell = rlGetLocationUniform(sim->sim_insert_program, "u_cell");
 call    0 returned 8
-        8:  497:    int loc_grid = rlGetLocationUniform(sim->sim_insert_program, "u_grid_dim");
+        8:  355:    int loc_grid = rlGetLocationUniform(sim->sim_insert_program, "u_grid_dim");
 call    0 returned 8
-        8:  498:    glUniform2f(loc_bounds, bounds.x, bounds.y);
+        8:  356:    glUniform2f(loc_bounds, bounds.x, bounds.y);
 call    0 returned 8
-        8:  499:    glUniform1f(loc_cell, cell);
+        8:  357:    glUniform1f(loc_cell, cell);
 call    0 returned 8
-        8:  500:    glUniform2i(loc_grid, grid_dim[0], grid_dim[1]);
+        8:  358:    glUniform2i(loc_grid, grid_dim[0], grid_dim[1]);
 call    0 returned 8
-        8:  501:    if (sim->loc_active_insert >= 0) {
+        8:  359:    if (sim->loc_active_insert >= 0) {
 branch  0 taken 8 (fallthrough)
 branch  1 taken 0
-        8:  502:        glUniform1i(sim->loc_active_insert, sim->active_count);
+        8:  360:        glUniform1i(sim->loc_active_insert, sim->active_count);
 call    0 returned 8
-        -:  503:    }
-        8:  504:    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, sim->ssbo);
+        -:  361:    }
+        8:  362:    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, sim->ssbo);
 call    0 returned 8
-        8:  505:    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, sim->ssbo_head);
+        8:  363:    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, sim->ssbo_head);
 call    0 returned 8
-        8:  506:    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, sim->ssbo_next);
+        8:  364:    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, sim->ssbo_next);
 call    0 returned 8
-        -:  507:
-        8:  508:    unsigned int groups = (sim->active_count + GPU_WORKGROUP_SIZE - 1) / GPU_WORKGROUP_SIZE;
-        8:  509:    if (groups > 0) {
+        -:  365:
+        8:  366:    unsigned int groups = (sim->active_count + GPU_WORKGROUP_SIZE - 1) / GPU_WORKGROUP_SIZE;
+        8:  367:    if (groups > 0) {
 branch  0 taken 8 (fallthrough)
 branch  1 taken 0
-        8:  510:        glDispatchCompute(groups, 1, 1);
+        8:  368:        glDispatchCompute(groups, 1, 1);
 call    0 returned 8
-        -:  511:    }
-        8:  512:    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT);
+        -:  369:    }
+        8:  370:    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT);
 call    0 returned 8
-        -:  513:
-        8:  514:    glUseProgram(sim->sim_collide_program);
+        -:  371:
+        8:  372:    glUseProgram(sim->sim_collide_program);
 call    0 returned 8
-        8:  515:    glUniform1f(sim->loc_dt, dt);
+        8:  373:    glUniform1f(sim->loc_dt, dt);
 call    0 returned 8
-        8:  516:    glUniform2f(sim->loc_bounds, bounds.x, bounds.y);
+        8:  374:    glUniform2f(sim->loc_bounds, bounds.x, bounds.y);
 call    0 returned 8
-        8:  517:    glUniform1f(sim->loc_cell, cell);
+        8:  375:    glUniform1f(sim->loc_cell, cell);
 call    0 returned 8
-        8:  518:    glUniform2i(sim->loc_grid_dim, grid_dim[0], grid_dim[1]);
+        8:  376:    glUniform2i(sim->loc_grid_dim, grid_dim[0], grid_dim[1]);
 call    0 returned 8
-        8:  519:    if (sim->loc_active_collide >= 0) {
+        8:  377:    if (sim->loc_active_collide >= 0) {
 branch  0 taken 8 (fallthrough)
 branch  1 taken 0
-        8:  520:        glUniform1i(sim->loc_active_collide, sim->active_count);
+        8:  378:        glUniform1i(sim->loc_active_collide, sim->active_count);
 call    0 returned 8
-        -:  521:    }
-        8:  522:    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, sim->ssbo);
+        -:  379:    }
+        8:  380:    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, sim->ssbo);
 call    0 returned 8
-        8:  523:    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, sim->ssbo_head);
+        8:  381:    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, sim->ssbo_head);
 call    0 returned 8
-        8:  524:    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, sim->ssbo_next);
+        8:  382:    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, sim->ssbo_next);
 call    0 returned 8
-        8:  525:    if (groups > 0) {
+        8:  383:    if (groups > 0) {
 branch  0 taken 8 (fallthrough)
 branch  1 taken 0
-        8:  526:        glDispatchCompute(groups, 1, 1);
+        8:  384:        glDispatchCompute(groups, 1, 1);
 call    0 returned 8
-        -:  527:    }
-        8:  528:    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT);
+        -:  385:    }
+        8:  386:    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT);
 call    0 returned 8
-        -:  529:}
-        -:  530:
+        -:  387:}
+        -:  388:
 function gpu_sim_render called 8 returned 100% blocks executed 94%
-        8:  531:void gpu_sim_render(const GpuSim *sim, Camera3D camera) {
-       8*:  532:    if (!sim->ready) return;
+        8:  389:void gpu_sim_render(const GpuSim *sim, Camera3D camera) {
+       8*:  390:    if (!sim->ready) return;
 branch  0 taken 0 (fallthrough)
 branch  1 taken 8
-        8:  533:    unsigned int active_fbo = rlGetActiveFramebuffer();
+        8:  391:    unsigned int active_fbo = rlGetActiveFramebuffer();
 call    0 returned 8
-        8:  534:    rlDrawRenderBatchActive();
+        8:  392:    rlDrawRenderBatchActive();
 call    0 returned 8
-        8:  535:    if (active_fbo != rlGetActiveFramebuffer()) {
+        8:  393:    if (active_fbo != rlGetActiveFramebuffer()) {
 call    0 returned 8
 branch  1 taken 0 (fallthrough)
 branch  2 taken 8
-    #####:  536:        rlEnableFramebuffer(active_fbo);
+    #####:  394:        rlEnableFramebuffer(active_fbo);
 call    0 never executed
-        -:  537:    }
-        8:  538:    glViewport(0, 0, GetRenderWidth(), GetRenderHeight());
+        -:  395:    }
+        8:  396:    glViewport(0, 0, GetRenderWidth(), GetRenderHeight());
 call    0 returned 8
 call    1 returned 8
 call    2 returned 8
-        -:  539:
-        8:  540:    Matrix view = GetCameraMatrix(camera);
+        -:  397:
+        8:  398:    Matrix view = GetCameraMatrix(camera);
 call    0 returned 8
-        8:  541:    Matrix proj = MatrixPerspective(DEG2RAD * camera.fovy,
-        8:  542:                                    (float)GetRenderWidth() / (float)GetRenderHeight(),
+        8:  399:    Matrix proj = MatrixPerspective(DEG2RAD * camera.fovy,
+        8:  400:                                    (float)GetRenderWidth() / (float)GetRenderHeight(),
 call    0 returned 8
 call    1 returned 8
 call    2 returned 8
-        -:  543:                                    0.1f, 200.0f);
-        8:  544:    Matrix vp = MatrixMultiply(view, proj);
+        -:  401:                                    0.1f, 200.0f);
+        8:  402:    Matrix vp = MatrixMultiply(view, proj);
 call    0 returned 8
-        -:  545:
-        8:  546:    glUseProgram(sim->render_shader.id);
+        -:  403:
+        8:  404:    glUseProgram(sim->render_shader.id);
 call    0 returned 8
-        8:  547:    glUniformMatrix4fv(sim->loc_vp, 1, GL_FALSE, MatrixToFloatV(vp).v);
+        8:  405:    glUniformMatrix4fv(sim->loc_vp, 1, GL_FALSE, MatrixToFloatV(vp).v);
 call    0 returned 8
 call    1 returned 8
-        8:  548:    if (sim->loc_time >= 0) {
+        8:  406:    if (sim->loc_time >= 0) {
 branch  0 taken 8 (fallthrough)
 branch  1 taken 0
-        8:  549:        glUniform1f(sim->loc_time, (float)GetTime());
+        8:  407:        glUniform1f(sim->loc_time, (float)GetTime());
 call    0 returned 8
 call    1 returned 8
-        -:  550:    }
-        -:  551:
-        8:  552:    glDisable(GL_CULL_FACE);
+        -:  408:    }
+        -:  409:
+        8:  410:    glDisable(GL_CULL_FACE);
 call    0 returned 8
-        8:  553:    glEnable(GL_BLEND);
+        8:  411:    glEnable(GL_BLEND);
 call    0 returned 8
-        8:  554:    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        8:  412:    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 call    0 returned 8
-        8:  555:    glDisable(GL_DEPTH_TEST);
+        8:  413:    glDisable(GL_DEPTH_TEST);
 call    0 returned 8
-        -:  556:
-        8:  557:    glBindVertexArray(sim->vao);
+        -:  414:
+        8:  415:    glBindVertexArray(sim->vao);
 call    0 returned 8
-        8:  558:    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sim->ebo);
+        8:  416:    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sim->ebo);
 call    0 returned 8
-        8:  559:    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, sim->ssbo);
+        8:  417:    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, sim->ssbo);
 call    0 returned 8
-        8:  560:    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+        8:  418:    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 call    0 returned 8
-        8:  561:    glDrawElementsInstanced(GL_TRIANGLES,
-        8:  562:                            sim->indices_count,
-        -:  563:                            GL_UNSIGNED_SHORT,
-        -:  564:                            (void *)0,
-        8:  565:                            sim->active_count);
+        8:  419:    glDrawElementsInstanced(GL_TRIANGLES,
+        8:  420:                            sim->indices_count,
+        -:  421:                            GL_UNSIGNED_SHORT,
+        -:  422:                            (void *)0,
+        8:  423:                            sim->active_count);
 call    0 returned 8
-        8:  566:    glBindVertexArray(0);
+        8:  424:    glBindVertexArray(0);
 call    0 returned 8
-        8:  567:    glUseProgram(0);
+        8:  425:    glUseProgram(0);
 call    0 returned 8
-        -:  568:}
-        -:  569:
+        -:  426:}
+        -:  427:
 function gpu_sim_supported called 14 returned 100% blocks executed 89%
-       14:  570:bool gpu_sim_supported(void) {
-       14:  571:    GLint major = 0;
-       14:  572:    GLint minor = 0;
-       14:  573:    glGetIntegerv(GL_MAJOR_VERSION, &major);
+       14:  428:bool gpu_sim_supported(void) {
+       14:  429:    GLint major = 0;
+       14:  430:    GLint minor = 0;
+       14:  431:    glGetIntegerv(GL_MAJOR_VERSION, &major);
 call    0 returned 14
-       14:  574:    glGetIntegerv(GL_MINOR_VERSION, &minor);
+       14:  432:    glGetIntegerv(GL_MINOR_VERSION, &minor);
 call    0 returned 14
-      14*:  575:    return (major > 4) || (major == 4 && minor >= 6);
+      14*:  433:    return (major > 4) || (major == 4 && minor >= 6);
 branch  0 taken 14 (fallthrough)
 branch  1 taken 0
 branch  2 taken 14 (fallthrough)
 branch  3 taken 0
 branch  4 taken 14 (fallthrough)
 branch  5 taken 0
-        -:  576:}
-        -:  577:
+        -:  434:}
+        -:  435:
 function gpu_sim_set_active_count called 13 returned 100% blocks executed 100%
-       13:  578:void gpu_sim_set_active_count(GpuSim *sim, int active_count) {
-       13:  579:    if (!sim) {
+       13:  436:void gpu_sim_set_active_count(GpuSim *sim, int active_count) {
+       13:  437:    if (!sim) {
 branch  0 taken 1 (fallthrough)
 branch  1 taken 12
-        1:  580:        return;
-        -:  581:    }
-       12:  582:    if (active_count < 0) {
+        1:  438:        return;
+        -:  439:    }
+       12:  440:    if (active_count < 0) {
 branch  0 taken 1 (fallthrough)
 branch  1 taken 11
-        1:  583:        active_count = 0;
-        -:  584:    }
-       12:  585:    if (active_count > sim->entity_count) {
+        1:  441:        active_count = 0;
+        -:  442:    }
+       12:  443:    if (active_count > sim->entity_count) {
 branch  0 taken 1 (fallthrough)
 branch  1 taken 11
-        1:  586:        active_count = sim->entity_count;
-        -:  587:    }
-       12:  588:    sim->active_count = active_count;
-        -:  589:}
+        1:  444:        active_count = sim->entity_count;
+        -:  445:    }
+       12:  446:    sim->active_count = active_count;
+        -:  447:}

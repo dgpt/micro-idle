@@ -1,0 +1,29 @@
+#version 460 core
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+struct Entity { vec4 pos; vec4 vel; vec4 color; vec4 params; };
+
+layout(std430, binding = 0) buffer Entities { Entity entities[]; };
+
+uniform int u_active;
+uniform vec2 u_bounds;
+uniform float u_cell;
+uniform ivec2 u_grid_dim;
+
+layout(std430, binding = 1) buffer GridHead { int head[]; };
+layout(std430, binding = 2) buffer GridNext { int next[]; };
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= uint(u_active) || idx >= entities.length()) return;
+
+    vec3 p = entities[idx].pos.xyz;
+    int gx = int((p.x + u_bounds.x) / u_cell);
+    int gz = int((p.z + u_bounds.y) / u_cell);
+    gx = clamp(gx, 0, u_grid_dim.x - 1);
+    gz = clamp(gz, 0, u_grid_dim.y - 1);
+
+    int cell = gz * u_grid_dim.x + gx;
+    next[idx] = atomicExchange(head[cell], int(idx));
+}

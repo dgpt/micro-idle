@@ -1,52 +1,52 @@
         -:    0:Source:/home/dgpt/code/games/micro-idle/engine/platform/time.c
         -:    0:Graph:build/CMakeFiles/tests.dir/engine/platform/time.c.gcno
         -:    0:Data:build/CMakeFiles/tests.dir/engine/platform/time.c.gcda
-        -:    0:Runs:15
+        -:    0:Runs:17
         -:    1:#include "engine/platform/time.h"
         -:    2:
-function time_init called 30 returned 100% blocks executed 75%
-       30:    3:void time_init(TimeState *state, int tick_hz) {
-       30:    4:    state->real_dt = 0.0;
-       30:    5:    state->accumulator = 0.0;
-      30*:    6:    state->tick_dt = (tick_hz > 0) ? (1.0 / (double)tick_hz) : (1.0 / 60.0);
-branch  0 taken 30 (fallthrough)
+function time_init called 34 returned 100% blocks executed 75%
+       34:    3:void time_init(TimeState *state, int tick_hz) {
+       34:    4:    state->real_dt = 0.0;
+       34:    5:    state->accumulator = 0.0;
+      34*:    6:    state->tick_dt = (tick_hz > 0) ? (1.0 / (double)tick_hz) : (1.0 / 60.0);
+branch  0 taken 34 (fallthrough)
 branch  1 taken 0
-       30:    7:    state->tick = 0;
-       30:    8:}
+       34:    7:    state->tick = 0;
+       34:    8:}
         -:    9:
-function time_update called 90 returned 100% blocks executed 100%
-       90:   10:int time_update(TimeState *state, double real_dt) {
-       90:   11:    if (real_dt < 0.0) {
-branch  0 taken 15 (fallthrough)
-branch  1 taken 75
-       15:   12:        real_dt = 0.0;
+function time_update called 102 returned 100% blocks executed 100%
+      102:   10:int time_update(TimeState *state, double real_dt) {
+      102:   11:    if (real_dt < 0.0) {
+branch  0 taken 17 (fallthrough)
+branch  1 taken 85
+       17:   12:        real_dt = 0.0;
         -:   13:    }
-       90:   14:    state->real_dt = real_dt;
-       90:   15:    state->accumulator += real_dt;
+      102:   14:    state->real_dt = real_dt;
+      102:   15:    state->accumulator += real_dt;
         -:   16:
-       90:   17:    int steps = 0;
-      240:   18:    while (state->accumulator >= state->tick_dt) {
-branch  0 taken 165
-branch  1 taken 75 (fallthrough)
-      165:   19:        state->accumulator -= state->tick_dt;
-      165:   20:        state->tick++;
-      165:   21:        steps++;
-      165:   22:        if (steps > 8) {
-branch  0 taken 15 (fallthrough)
-branch  1 taken 150
-       15:   23:            state->accumulator = 0.0;
-       15:   24:            break;
+      102:   17:    int steps = 0;
+      272:   18:    while (state->accumulator >= state->tick_dt) {
+branch  0 taken 187
+branch  1 taken 85 (fallthrough)
+      187:   19:        state->accumulator -= state->tick_dt;
+      187:   20:        state->tick++;
+      187:   21:        steps++;
+      187:   22:        if (steps > 8) {
+branch  0 taken 17 (fallthrough)
+branch  1 taken 170
+       17:   23:            state->accumulator = 0.0;
+       17:   24:            break;
         -:   25:        }
         -:   26:    }
-       90:   27:    return steps;
+      102:   27:    return steps;
         -:   28:}
         -:   29:
-function time_alpha called 40 returned 100% blocks executed 100%
-       40:   30:float time_alpha(const TimeState *state) {
-       40:   31:    if (state->tick_dt <= 0.0) {
-branch  0 taken 10 (fallthrough)
-branch  1 taken 30
-       10:   32:        return 0.0f;
+function time_alpha called 46 returned 100% blocks executed 100%
+       46:   30:float time_alpha(const TimeState *state) {
+       46:   31:    if (state->tick_dt <= 0.0) {
+branch  0 taken 12 (fallthrough)
+branch  1 taken 34
+       12:   32:        return 0.0f;
         -:   33:    }
-       30:   34:    return (float)(state->accumulator / state->tick_dt);
+       34:   34:    return (float)(state->accumulator / state->tick_dt);
         -:   35:}
