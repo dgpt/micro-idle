@@ -2,6 +2,7 @@
 
 // XPBD Step 1: Predict positions
 // Apply external forces and predict new positions using symplectic Euler integration.
+// Includes: self-propulsion, Brownian motion, drag
 
 layout(local_size_x = 256) in;
 
@@ -12,10 +13,31 @@ struct Particle {
     vec4 data;      // x = particle_index, y = constraint_start, z = constraint_count
 };
 
+struct Microbe {
+    vec4 center;    // xyz center of mass, w = radius
+    vec4 color;     // rgba
+    vec4 params;    // x = type, y = stiffness, z = seed, w = squish_amount
+    vec4 aabb;      // bounding box
+};
+
 layout(std430, binding = 0) buffer Particles { Particle particles[]; };
+layout(std430, binding = 1) buffer Microbes { Microbe microbes[]; };
 
 uniform float u_dt;
 uniform int u_particle_count;
+uniform int u_particles_per_microbe;
+uniform float u_time;
+
+// Simple hash function for pseudo-random per-particle variation
+float hash(float n) {
+    return fract(sin(n) * 43758.5453123);
+}
+
+vec3 hash3(vec3 p) {
+    p = fract(p * vec3(0.1031, 0.1030, 0.0973));
+    p += dot(p, p.yxz + 33.33);
+    return fract((p.xxy + p.yxx) * p.zyx);
+}
 
 void main() {
     uint idx = gl_GlobalInvocationID.x;
@@ -30,9 +52,76 @@ void main() {
     // Store previous position for velocity derivation later
     p.pos_prev.xyz = p.pos.xyz;
 
-    // Apply velocity (no gravity for top-down 2D microbes)
-    // Small damping for stability
-    p.vel.xyz *= 0.995;
+    // Get microbe info
+    int microbe_id = int(p.vel.w);
+    int particle_idx = int(p.data.x);
+    Microbe m = microbes[microbe_id];
+    float microbe_type = m.params.x;
+    float seed = m.params.z;
+
+    vec3 center = m.center.xyz;
+    vec3 to_center = p.pos.xyz - center;
+    vec3 radial_dir = length(to_center) > 0.001 ? normalize(to_center) : vec3(1, 0, 0);
+
+    // === SELF-PROPULSION ===
+    // Bacteria swim via flagella - create directed propulsion
+    // Different types have different motility patterns
+
+    vec3 propulsion = vec3(0.0);
+    float propulsion_strength = 0.0;
+    float tumble_freq = 0.0;
+
+    if (microbe_type < 0.5) {
+        // Coccus: slow, irregular motion
+        propulsion_strength = 0.8;
+        tumble_freq = 2.0;
+    } else if (microbe_type < 1.5) {
+        // Bacillus: steady swimming with occasional tumbles
+        propulsion_strength = 2.5;
+        tumble_freq = 0.5;
+    } else if (microbe_type < 2.5) {
+        // Vibrio: curved, spiraling motion
+        propulsion_strength = 2.0;
+        tumble_freq = 1.0;
+    } else {
+        // Spirillum: corkscrew motion
+        propulsion_strength = 1.8;
+        tumble_freq = 0.8;
+    }
+
+    // Tumbling: bacteria periodically change direction
+    float tumble_phase = floor(u_time * tumble_freq + seed * 10.0);
+    float tumble_hash = hash(tumble_phase + seed);
+    float tumble_angle = tumble_hash * 6.28318;
+
+    // Swimming direction (with tumbling)
+    vec2 swim_dir = vec2(cos(tumble_angle), sin(tumble_angle));
+
+    // Apply propulsion force mainly to "rear" particles for push effect
+    // Particles 0-2 are "front", 4-6 are "rear" in the ring
+    float is_rear = step(3.5, float(particle_idx)) * step(float(particle_idx), 6.5);
+    float is_front = step(float(particle_idx), 2.5);
+
+    propulsion.xz = swim_dir * propulsion_strength * is_rear * 1.5;
+    propulsion.xz += swim_dir * propulsion_strength * is_front * 0.3; // Front particles also get small push
+
+    // === BROWNIAN MOTION ===
+    // Thermal fluctuations - random kicks
+    float brownian_strength = 0.5;
+    vec3 brownian_seed = vec3(idx, u_time * 10.0, seed);
+    vec3 brownian = (hash3(brownian_seed) - 0.5) * 2.0 * brownian_strength;
+
+    // === DRAG FORCE ===
+    // Realistic fluid drag: F_drag = -k * v
+    // k depends on microbe size and medium viscosity
+    float drag_coefficient = 0.8; // Water-like medium
+    vec3 drag = -drag_coefficient * p.vel.xyz;
+
+    // === TOTAL FORCE ===
+    vec3 total_force = propulsion + brownian + drag;
+
+    // Apply force as velocity change (F = m * a, a = F / m = F * inv_mass)
+    p.vel.xyz += total_force * inv_mass * u_dt;
 
     // Predict new position
     p.pos.xyz += p.vel.xyz * u_dt;

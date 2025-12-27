@@ -206,6 +206,8 @@ struct XpbdContext {
     // Uniform locations
     int loc_predict_dt;
     int loc_predict_count;
+    int loc_predict_ppm;
+    int loc_predict_time;
 
     int loc_grid_bounds;
     int loc_grid_cell;
@@ -385,6 +387,8 @@ XpbdContext *xpbd_create(int max_microbes) {
     // Get uniform locations
     ctx->loc_predict_dt = glGetUniformLocation(ctx->predict_program, "u_dt");
     ctx->loc_predict_count = glGetUniformLocation(ctx->predict_program, "u_particle_count");
+    ctx->loc_predict_ppm = glGetUniformLocation(ctx->predict_program, "u_particles_per_microbe");
+    ctx->loc_predict_time = glGetUniformLocation(ctx->predict_program, "u_time");
 
     ctx->loc_grid_bounds = glGetUniformLocation(ctx->grid_insert_program, "u_bounds");
     ctx->loc_grid_cell = glGetUniformLocation(ctx->grid_insert_program, "u_cell");
@@ -640,7 +644,10 @@ void xpbd_update(XpbdContext *ctx, float dt, float bounds_x, float bounds_y) {
     glUseProgram(ctx->predict_program);
     glUniform1f(ctx->loc_predict_dt, dt);
     glUniform1i(ctx->loc_predict_count, ctx->particle_count);
+    glUniform1i(ctx->loc_predict_ppm, XPBD_PARTICLES_PER_MICROBE);
+    glUniform1f(ctx->loc_predict_time, (float)GetTime());
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, ctx->particle_ssbo);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ctx->microbe_ssbo);
     glDispatchCompute(groups_p, 1, 1);
     glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 
