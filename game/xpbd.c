@@ -261,9 +261,12 @@ static bool init_render_pipeline(XpbdContext *ctx) {
     ctx->loc_render_time = glGetUniformLocation(ctx->render_shader, "u_time");
     ctx->loc_render_ppm = glGetUniformLocation(ctx->render_shader, "u_particles_per_microbe");
 
-    const int segments = 48;
-    const int vert_count = segments + 1;
-    ctx->render_index_count = segments * 3;
+    // High-resolution mesh for smooth amoeba-like deformation
+    const int radial_segments = 128;  // Much higher resolution around the perimeter
+    const int radial_rings = 8;       // Multiple rings for smoother radial interpolation
+    const int vert_count = radial_rings * radial_segments + 1;  // +1 for center
+    const int tri_count = (radial_rings - 1) * radial_segments * 2 + radial_segments;
+    ctx->render_index_count = tri_count * 3;
 
     float *verts = (float *)malloc(sizeof(float) * 3 * (size_t)vert_count);
     unsigned int *indices = (unsigned int *)malloc(sizeof(unsigned int) * (size_t)ctx->render_index_count);
@@ -273,21 +276,52 @@ static bool init_render_pipeline(XpbdContext *ctx) {
         return false;
     }
 
+    // Center vertex
     verts[0] = 0.0f;
     verts[1] = 0.0f;
     verts[2] = 0.0f;
-    for (int i = 0; i < segments; i++) {
-        float angle = (float)i * 6.28318530718f / (float)segments;
-        int base = (i + 1) * 3;
-        verts[base + 0] = cosf(angle);
-        verts[base + 1] = 0.0f;
-        verts[base + 2] = sinf(angle);
+
+    // Create concentric rings
+    int vert_idx = 1;
+    for (int ring = 0; ring < radial_rings; ring++) {
+        float radius = (float)(ring + 1) / (float)radial_rings;  // 0 to 1
+        for (int seg = 0; seg < radial_segments; seg++) {
+            float angle = (float)seg * 6.28318530718f / (float)radial_segments;
+            verts[vert_idx * 3 + 0] = cosf(angle) * radius;
+            verts[vert_idx * 3 + 1] = 0.0f;
+            verts[vert_idx * 3 + 2] = sinf(angle) * radius;
+            vert_idx++;
+        }
     }
 
-    for (int i = 0; i < segments; i++) {
-        indices[i * 3 + 0] = 0;
-        indices[i * 3 + 1] = (unsigned int)(i + 1);
-        indices[i * 3 + 2] = (i + 1 == segments) ? 1u : (unsigned int)(i + 2);
+    // Build indices
+    int idx = 0;
+
+    // Center fan to first ring
+    for (int seg = 0; seg < radial_segments; seg++) {
+        indices[idx++] = 0;
+        indices[idx++] = 1 + seg;
+        indices[idx++] = 1 + ((seg + 1) % radial_segments);
+    }
+
+    // Connect rings
+    for (int ring = 0; ring < radial_rings - 1; ring++) {
+        int ring_start = 1 + ring * radial_segments;
+        int next_ring_start = 1 + (ring + 1) * radial_segments;
+
+        for (int seg = 0; seg < radial_segments; seg++) {
+            int next_seg = (seg + 1) % radial_segments;
+
+            // First triangle
+            indices[idx++] = ring_start + seg;
+            indices[idx++] = next_ring_start + seg;
+            indices[idx++] = ring_start + next_seg;
+
+            // Second triangle
+            indices[idx++] = ring_start + next_seg;
+            indices[idx++] = next_ring_start + seg;
+            indices[idx++] = next_ring_start + next_seg;
+        }
     }
 
     glGenVertexArrays(1, &ctx->render_vao);

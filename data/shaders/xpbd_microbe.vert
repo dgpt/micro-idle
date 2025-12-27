@@ -47,37 +47,43 @@ void main() {
     float squish = m.params.w;
 
     // Compute local vertex position
-    // aPos is on a unit circle, we'll deform it based on nearby particles
     vec2 localDir = normalize(aPos.xz + vec2(0.0001));
     float localAngle = atan(localDir.y, localDir.x);
     float localDist = length(aPos.xz);
 
-    // Find the particle closest to this vertex direction and use its position
-    // to deform the mesh
-    float bestDot = -1.0;
-    vec3 closestParticle = center;
-    vec3 secondClosest = center;
+    // Smooth blob-like deformation using weighted blend of ALL particles
+    // This creates organic, amoeba-like shapes instead of faceted polygons
+    vec3 blendedPos = vec3(0.0);
+    float totalWeight = 0.0;
 
     for (int i = 0; i < u_particles_per_microbe; i++) {
         vec3 ppos = particles[particle_start + i].pos.xyz;
         vec3 toParticle = ppos - center;
         vec2 particleDir = normalize(toParticle.xz + vec2(0.0001));
 
-        float d = dot(localDir, particleDir);
-        if (d > bestDot) {
-            secondClosest = closestParticle;
-            closestParticle = ppos;
-            bestDot = d;
-        }
+        // Angular distance between this vertex and particle
+        float angle_diff = acos(clamp(dot(localDir, particleDir), -1.0, 1.0));
+
+        // Smooth falloff - particles influence nearby vertices smoothly
+        // Using a wide Gaussian falloff for blob-like organic shapes
+        float sigma = 1.5;  // Wide influence for smooth blending
+        float weight = exp(-(angle_diff * angle_diff) / (2.0 * sigma * sigma));
+
+        // Radial influence - particles affect the shape outward
+        float particleRadius = length(toParticle.xz);
+        vec3 extendedPos = center + normalize(toParticle) * particleRadius * (1.0 + localDist * 0.5);
+
+        blendedPos += extendedPos * weight;
+        totalWeight += weight;
     }
 
-    // Interpolate between closest particles for smooth deformation
-    float t = (bestDot + 1.0) * 0.5;  // 0 to 1
-    vec3 deformedEdge = mix(secondClosest, closestParticle, t);
+    // Normalize by total weight
+    vec3 deformedEdge = (totalWeight > 0.001) ? (blendedPos / totalWeight) : center;
 
-    // Compute final vertex position
-    // Blend between center and deformed edge based on localDist
-    vec3 worldPos = mix(center, deformedEdge, localDist);
+    // Smooth interpolation from center to deformed edge
+    // Use smoothstep for even more organic feel
+    float blend = smoothstep(0.0, 1.0, localDist);
+    vec3 worldPos = mix(center, deformedEdge, blend);
 
     // Add subtle organic motion
     float breathe = 1.0 + sin(u_time * 1.5 + seed * 6.28) * 0.03;
