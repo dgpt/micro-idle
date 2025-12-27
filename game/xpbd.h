@@ -9,9 +9,9 @@
 // Each microbe is represented as a cluster of particles connected by distance constraints.
 // The XPBD solver maintains shape while allowing natural deformation on collision.
 
-#define XPBD_PARTICLES_PER_MICROBE 8   // Ring of particles around center
-#define XPBD_CONSTRAINTS_PER_MICROBE 16 // Distance constraints (ring + cross)
-#define XPBD_SOLVER_ITERATIONS 4        // Constraint solve iterations per frame
+#define XPBD_PARTICLES_PER_MICROBE 32  // Ring of particles forming membrane (higher resolution)
+#define XPBD_CONSTRAINTS_PER_MICROBE 96 // Distance constraints (ring + cross + diagonals)
+#define XPBD_SOLVER_ITERATIONS 6        // Balanced for smooth motion
 
 // Particle data (GPU layout, 48 bytes, padded to 64)
 typedef struct {
@@ -51,7 +51,7 @@ void xpbd_spawn_microbe(XpbdContext *ctx, float x, float z, int type, float seed
 void xpbd_clear(XpbdContext *ctx);
 
 // Simulation
-void xpbd_update(XpbdContext *ctx, float dt, float bounds_x, float bounds_y);
+void xpbd_update(XpbdContext *ctx, float dt, float bounds_x, float bounds_y, float cursor_x, float cursor_z);
 
 // Rendering
 void xpbd_render(const XpbdContext *ctx, Camera3D camera);

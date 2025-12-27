@@ -52,6 +52,7 @@ add_executable(tests
     tests/test_rng.c
     tests/test_engine.c
     tests/test_game_constants.c
+    tests/test_visual.c
     engine/platform/engine.c
     engine/platform/time.c
     engine/util/rng.c
@@ -60,6 +61,7 @@ add_executable(tests
 )
 target_include_directories(tests PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 target_link_libraries(tests PRIVATE raylib)
+target_compile_definitions(tests PRIVATE GRAPHICS_API_OPENGL_46)
 if (NOT WIN32)
     target_compile_options(tests PRIVATE --coverage -O0)
     target_link_options(tests PRIVATE --coverage)

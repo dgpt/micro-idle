@@ -188,26 +188,38 @@ struct XpbdContext {
     unsigned int grid_insert_program;
     unsigned int collide_program;
     unsigned int solve_program;
+    unsigned int pressure_program;
     unsigned int finalize_program;
     unsigned int microbe_update_program;
 
-    // Rendering
-    unsigned int render_shader;
-    unsigned int render_vao;
-    unsigned int render_vbo;
-    unsigned int render_ebo;
-    int render_index_count;
+    // Metaball rendering (two-pass)
+    unsigned int field_fbo;           // Framebuffer for field accumulation
+    unsigned int field_texture;       // Field texture (RGBA16F)
+    unsigned int field_shader;        // Pass 1: render particle billboards
+    unsigned int surface_shader;      // Pass 2: threshold and display surface
 
-    // Render uniform locations
-    int loc_render_vp;
-    int loc_render_time;
-    int loc_render_ppm;
+    // Billboard geometry (simple quad for particle rendering)
+    unsigned int billboard_vao;
+    unsigned int billboard_vbo;
+
+    // Fullscreen quad (for surface pass)
+    unsigned int quad_vao;
+    unsigned int quad_vbo;
+
+    // Metaball shader uniform locations
+    int loc_field_vp;
+    int loc_field_ppm;
+    int loc_field_radius;
+    int loc_surface_field_tex;
+    int loc_surface_time;
+    int loc_surface_threshold;
 
     // Uniform locations
     int loc_predict_dt;
     int loc_predict_count;
     int loc_predict_ppm;
     int loc_predict_time;
+    int loc_predict_cursor;
 
     int loc_grid_bounds;
     int loc_grid_cell;
@@ -223,6 +235,10 @@ struct XpbdContext {
 
     int loc_solve_dt;
     int loc_solve_count;
+
+    int loc_pressure_dt;
+    int loc_pressure_count;
+    int loc_pressure_ppm;
 
     int loc_finalize_dt;
     int loc_finalize_pcount;
@@ -241,109 +257,103 @@ struct XpbdContext {
     bool ready;
 };
 
-static bool init_render_pipeline(XpbdContext *ctx) {
-    unsigned int vs = compile_shader(GL_VERTEX_SHADER, "xpbd_microbe.vert");
-    unsigned int fs = compile_shader(GL_FRAGMENT_SHADER, "xpbd_microbe.frag");
-    if (!vs || !fs) {
-        if (vs) glDeleteShader(vs);
-        if (fs) glDeleteShader(fs);
+static bool init_metaball_pipeline(XpbdContext *ctx) {
+    // Compile metaball shaders
+    unsigned int field_vs = compile_shader(GL_VERTEX_SHADER, "metaball_field.vert");
+    unsigned int field_fs = compile_shader(GL_FRAGMENT_SHADER, "metaball_field.frag");
+    unsigned int surface_vs = compile_shader(GL_VERTEX_SHADER, "metaball_surface.vert");
+    unsigned int surface_fs = compile_shader(GL_FRAGMENT_SHADER, "metaball_surface.frag");
+
+    if (!field_vs || !field_fs || !surface_vs || !surface_fs) {
+        if (field_vs) glDeleteShader(field_vs);
+        if (field_fs) glDeleteShader(field_fs);
+        if (surface_vs) glDeleteShader(surface_vs);
+        if (surface_fs) glDeleteShader(surface_fs);
         return false;
     }
 
-    ctx->render_shader = link_program_pair(vs, fs);
-    glDeleteShader(vs);
-    glDeleteShader(fs);
-    if (!ctx->render_shader) {
+    ctx->field_shader = link_program_pair(field_vs, field_fs);
+    ctx->surface_shader = link_program_pair(surface_vs, surface_fs);
+
+    glDeleteShader(field_vs);
+    glDeleteShader(field_fs);
+    glDeleteShader(surface_vs);
+    glDeleteShader(surface_fs);
+
+    if (!ctx->field_shader || !ctx->surface_shader) {
         return false;
     }
 
-    ctx->loc_render_vp = glGetUniformLocation(ctx->render_shader, "u_vp");
-    ctx->loc_render_time = glGetUniformLocation(ctx->render_shader, "u_time");
-    ctx->loc_render_ppm = glGetUniformLocation(ctx->render_shader, "u_particles_per_microbe");
+    // Get uniform locations
+    ctx->loc_field_vp = glGetUniformLocation(ctx->field_shader, "u_vp");
+    ctx->loc_field_ppm = glGetUniformLocation(ctx->field_shader, "u_particles_per_microbe");
+    ctx->loc_field_radius = glGetUniformLocation(ctx->field_shader, "u_particle_radius");
 
-    // High-resolution mesh for smooth amoeba-like deformation
-    const int radial_segments = 128;  // Much higher resolution around the perimeter
-    const int radial_rings = 8;       // Multiple rings for smoother radial interpolation
-    const int vert_count = radial_rings * radial_segments + 1;  // +1 for center
-    const int tri_count = (radial_rings - 1) * radial_segments * 2 + radial_segments;
-    ctx->render_index_count = tri_count * 3;
+    ctx->loc_surface_field_tex = glGetUniformLocation(ctx->surface_shader, "u_field_texture");
+    ctx->loc_surface_time = glGetUniformLocation(ctx->surface_shader, "u_time");
+    ctx->loc_surface_threshold = glGetUniformLocation(ctx->surface_shader, "u_threshold");
 
-    float *verts = (float *)malloc(sizeof(float) * 3 * (size_t)vert_count);
-    unsigned int *indices = (unsigned int *)malloc(sizeof(unsigned int) * (size_t)ctx->render_index_count);
-    if (!verts || !indices) {
-        free(verts);
-        free(indices);
+    // Create field accumulation framebuffer (screen-sized, will resize on first render)
+    glGenFramebuffers(1, &ctx->field_fbo);
+    glGenTextures(1, &ctx->field_texture);
+    glBindTexture(GL_TEXTURE_2D, ctx->field_texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, 1920, 1080, 0, GL_RGBA, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, ctx->field_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ctx->field_texture, 0);
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        fprintf(stderr, "xpbd: metaball framebuffer incomplete\n");
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
         return false;
     }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-    // Center vertex
-    verts[0] = 0.0f;
-    verts[1] = 0.0f;
-    verts[2] = 0.0f;
+    // Create billboard geometry (simple quad for particle instances)
+    // Each particle will be rendered as a billboard quad
+    float billboard_verts[] = {
+        -1.0f, -1.0f,
+         1.0f, -1.0f,
+        -1.0f,  1.0f,
+         1.0f,  1.0f
+    };
 
-    // Create concentric rings
-    int vert_idx = 1;
-    for (int ring = 0; ring < radial_rings; ring++) {
-        float radius = (float)(ring + 1) / (float)radial_rings;  // 0 to 1
-        for (int seg = 0; seg < radial_segments; seg++) {
-            float angle = (float)seg * 6.28318530718f / (float)radial_segments;
-            verts[vert_idx * 3 + 0] = cosf(angle) * radius;
-            verts[vert_idx * 3 + 1] = 0.0f;
-            verts[vert_idx * 3 + 2] = sinf(angle) * radius;
-            vert_idx++;
-        }
-    }
+    glGenVertexArrays(1, &ctx->billboard_vao);
+    glBindVertexArray(ctx->billboard_vao);
 
-    // Build indices
-    int idx = 0;
-
-    // Center fan to first ring
-    for (int seg = 0; seg < radial_segments; seg++) {
-        indices[idx++] = 0;
-        indices[idx++] = 1 + seg;
-        indices[idx++] = 1 + ((seg + 1) % radial_segments);
-    }
-
-    // Connect rings
-    for (int ring = 0; ring < radial_rings - 1; ring++) {
-        int ring_start = 1 + ring * radial_segments;
-        int next_ring_start = 1 + (ring + 1) * radial_segments;
-
-        for (int seg = 0; seg < radial_segments; seg++) {
-            int next_seg = (seg + 1) % radial_segments;
-
-            // First triangle
-            indices[idx++] = ring_start + seg;
-            indices[idx++] = next_ring_start + seg;
-            indices[idx++] = ring_start + next_seg;
-
-            // Second triangle
-            indices[idx++] = ring_start + next_seg;
-            indices[idx++] = next_ring_start + seg;
-            indices[idx++] = next_ring_start + next_seg;
-        }
-    }
-
-    glGenVertexArrays(1, &ctx->render_vao);
-    glBindVertexArray(ctx->render_vao);
-
-    glGenBuffers(1, &ctx->render_vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, ctx->render_vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 3 * (size_t)vert_count, verts, GL_STATIC_DRAW);
-
-    glGenBuffers(1, &ctx->render_ebo);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ctx->render_ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(unsigned int) * (size_t)ctx->render_index_count, indices, GL_STATIC_DRAW);
+    glGenBuffers(1, &ctx->billboard_vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, ctx->billboard_vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(billboard_verts), billboard_verts, GL_STATIC_DRAW);
 
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void *)0);
 
     glBindVertexArray(0);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
-    free(verts);
-    free(indices);
+    // Create fullscreen quad for surface rendering pass
+    float quad_verts[] = {
+        -1.0f, -1.0f,
+         1.0f, -1.0f,
+        -1.0f,  1.0f,
+         1.0f,  1.0f
+    };
+
+    glGenVertexArrays(1, &ctx->quad_vao);
+    glBindVertexArray(ctx->quad_vao);
+
+    glGenBuffers(1, &ctx->quad_vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, ctx->quad_vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(quad_verts), quad_verts, GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void *)0);
+
+    glBindVertexArray(0);
+
     return true;
 }
 
@@ -404,17 +414,18 @@ XpbdContext *xpbd_create(int max_microbes) {
     ctx->grid_insert_program = compile_compute_program("xpbd_grid_insert.comp");
     ctx->collide_program = compile_compute_program("xpbd_collide.comp");
     ctx->solve_program = compile_compute_program("xpbd_solve.comp");
+    ctx->pressure_program = compile_compute_program("xpbd_pressure.comp");
     ctx->finalize_program = compile_compute_program("xpbd_finalize.comp");
     ctx->microbe_update_program = compile_compute_program("xpbd_microbe_update.comp");
 
     if (!ctx->predict_program || !ctx->grid_insert_program || !ctx->collide_program ||
-        !ctx->solve_program || !ctx->finalize_program || !ctx->microbe_update_program) {
+        !ctx->solve_program || !ctx->pressure_program || !ctx->finalize_program || !ctx->microbe_update_program) {
         fprintf(stderr, "xpbd: failed to compile compute programs\n");
         goto fail;
     }
 
-    if (!init_render_pipeline(ctx)) {
-        fprintf(stderr, "xpbd: failed to init render pipeline\n");
+    if (!init_metaball_pipeline(ctx)) {
+        fprintf(stderr, "xpbd: failed to init metaball rendering pipeline\n");
         goto fail;
     }
 
@@ -423,6 +434,7 @@ XpbdContext *xpbd_create(int max_microbes) {
     ctx->loc_predict_count = glGetUniformLocation(ctx->predict_program, "u_particle_count");
     ctx->loc_predict_ppm = glGetUniformLocation(ctx->predict_program, "u_particles_per_microbe");
     ctx->loc_predict_time = glGetUniformLocation(ctx->predict_program, "u_time");
+    ctx->loc_predict_cursor = glGetUniformLocation(ctx->predict_program, "u_cursor");
 
     ctx->loc_grid_bounds = glGetUniformLocation(ctx->grid_insert_program, "u_bounds");
     ctx->loc_grid_cell = glGetUniformLocation(ctx->grid_insert_program, "u_cell");
@@ -438,6 +450,10 @@ XpbdContext *xpbd_create(int max_microbes) {
 
     ctx->loc_solve_dt = glGetUniformLocation(ctx->solve_program, "u_dt");
     ctx->loc_solve_count = glGetUniformLocation(ctx->solve_program, "u_constraint_count");
+
+    ctx->loc_pressure_dt = glGetUniformLocation(ctx->pressure_program, "u_dt");
+    ctx->loc_pressure_count = glGetUniformLocation(ctx->pressure_program, "u_microbe_count");
+    ctx->loc_pressure_ppm = glGetUniformLocation(ctx->pressure_program, "u_particles_per_microbe");
 
     ctx->loc_finalize_dt = glGetUniformLocation(ctx->finalize_program, "u_dt");
     ctx->loc_finalize_pcount = glGetUniformLocation(ctx->finalize_program, "u_particle_count");
@@ -470,12 +486,17 @@ void xpbd_destroy(XpbdContext *ctx) {
     if (ctx->grid_insert_program) glDeleteProgram(ctx->grid_insert_program);
     if (ctx->collide_program) glDeleteProgram(ctx->collide_program);
     if (ctx->solve_program) glDeleteProgram(ctx->solve_program);
+    if (ctx->pressure_program) glDeleteProgram(ctx->pressure_program);
     if (ctx->finalize_program) glDeleteProgram(ctx->finalize_program);
     if (ctx->microbe_update_program) glDeleteProgram(ctx->microbe_update_program);
-    if (ctx->render_shader) glDeleteProgram(ctx->render_shader);
-    if (ctx->render_vbo) glDeleteBuffers(1, &ctx->render_vbo);
-    if (ctx->render_ebo) glDeleteBuffers(1, &ctx->render_ebo);
-    if (ctx->render_vao) glDeleteVertexArrays(1, &ctx->render_vao);
+    if (ctx->field_shader) glDeleteProgram(ctx->field_shader);
+    if (ctx->surface_shader) glDeleteProgram(ctx->surface_shader);
+    if (ctx->field_texture) glDeleteTextures(1, &ctx->field_texture);
+    if (ctx->field_fbo) glDeleteFramebuffers(1, &ctx->field_fbo);
+    if (ctx->billboard_vbo) glDeleteBuffers(1, &ctx->billboard_vbo);
+    if (ctx->billboard_vao) glDeleteVertexArrays(1, &ctx->billboard_vao);
+    if (ctx->quad_vbo) glDeleteBuffers(1, &ctx->quad_vbo);
+    if (ctx->quad_vao) glDeleteVertexArrays(1, &ctx->quad_vao);
 
     free(ctx->particles_cpu);
     free(ctx->constraints_cpu);
@@ -483,29 +504,10 @@ void xpbd_destroy(XpbdContext *ctx) {
     free(ctx);
 }
 
-// Color palettes for microbe types
-static const float TYPE_COLORS[4][4] = {
-    {0.46f, 0.92f, 0.74f, 0.85f},  // Coccus - mint
-    {0.47f, 0.78f, 0.97f, 0.85f},  // Bacillus - cyan
-    {0.97f, 0.78f, 0.33f, 0.85f},  // Vibrio - amber
-    {0.55f, 0.46f, 0.98f, 0.85f},  // Spirillum - indigo
-};
-
-// Stiffness per type (compliance = 1/stiffness)
-static const float TYPE_STIFFNESS[4] = {
-    500.0f,   // Coccus - quite stiff (spherical)
-    300.0f,   // Bacillus - medium (rod)
-    200.0f,   // Vibrio - soft (curved, flexible)
-    250.0f,   // Spirillum - medium-soft (spiral)
-};
-
-// Base radius per type
-static const float TYPE_RADIUS[4] = {
-    0.9f,    // Coccus
-    1.3f,    // Bacillus (elongated)
-    1.05f,   // Vibrio
-    1.05f,   // Spirillum
-};
+// Unified amoeba appearance - all cells look identical for consistent EC&M model
+static const float AMOEBA_COLOR[4] = {0.46f, 0.92f, 0.74f, 0.85f};  // Translucent mint
+static const float AMOEBA_STIFFNESS = 45.0f;  // Elastic membrane
+static const float AMOEBA_PARTICLE_RADIUS = 0.35f;  // Particle spacing in filled disc
 
 void xpbd_spawn_microbe(XpbdContext *ctx, float x, float z, int type, float seed) {
     if (!ctx || !ctx->ready) return;
@@ -515,88 +517,99 @@ void xpbd_spawn_microbe(XpbdContext *ctx, float x, float z, int type, float seed
     int p_start = m_id * XPBD_PARTICLES_PER_MICROBE;
     int c_start = m_id * XPBD_CONSTRAINTS_PER_MICROBE;
 
-    type = type % 4;
-    float base_radius = TYPE_RADIUS[type] * (0.8f + seed * 0.4f);
-    float stiffness = TYPE_STIFFNESS[type];
-    float compliance = 1.0f / stiffness;
+    // Particle distribution: filled disc with uniform density
+    // Ring structure: center (1) + inner (6) + middle (11) + outer (14) = 32 particles
+    const int ring_counts[4] = {1, 6, 11, 14};
+    const float ring_radii[4] = {0.0f, 0.35f, 0.7f, 1.05f};
+    int particle_idx = 0;
 
-    // Elongation for rod-shaped bacteria
-    float elongation = 1.0f;
-    if (type == 1) elongation = 1.8f;       // Bacillus
-    else if (type == 2) elongation = 1.4f;  // Vibrio
-    else if (type == 3) elongation = 1.6f;  // Spirillum
+    for (int ring = 0; ring < 4; ring++) {
+        int count = ring_counts[ring];
+        float radius = ring_radii[ring];
 
-    // Create particles in an ellipse/ring
-    for (int i = 0; i < XPBD_PARTICLES_PER_MICROBE; i++) {
-        float angle = (float)i / XPBD_PARTICLES_PER_MICROBE * 2.0f * 3.14159f;
-        float px = x + cosf(angle) * base_radius * elongation;
-        float pz = z + sinf(angle) * base_radius;
+        for (int i = 0; i < count; i++) {
+            float angle = (count > 1) ? ((float)i / (float)count * 2.0f * 3.14159f) : 0.0f;
+            float px = x + cosf(angle) * radius;
+            float pz = z + sinf(angle) * radius;
 
-        XpbdParticle *p = &ctx->particles_cpu[p_start + i];
-        p->pos[0] = px;
-        p->pos[1] = 0.0f;
-        p->pos[2] = pz;
-        p->pos[3] = 1.0f;  // inverse mass = 1
+            XpbdParticle *p = &ctx->particles_cpu[p_start + particle_idx];
+            p->pos[0] = px;
+            p->pos[1] = 0.0f;
+            p->pos[2] = pz;
+            p->pos[3] = 1.0f;  // inverse mass = 1
 
-        p->pos_prev[0] = px;
-        p->pos_prev[1] = 0.0f;
-        p->pos_prev[2] = pz;
-        p->pos_prev[3] = 0.0f;
+            p->pos_prev[0] = px;
+            p->pos_prev[1] = 0.0f;
+            p->pos_prev[2] = pz;
+            p->pos_prev[3] = 0.0f;
 
-        // Initial velocity (random drift)
-        float vx = (seed - 0.5f) * 0.5f + sinf(seed * 10.0f + i) * 0.2f;
-        float vz = (seed - 0.3f) * 0.5f + cosf(seed * 10.0f + i) * 0.2f;
-        p->vel[0] = vx;
-        p->vel[1] = 0.0f;
-        p->vel[2] = vz;
-        p->vel[3] = (float)m_id;  // microbe ID
+            p->vel[0] = 0.0f;
+            p->vel[1] = 0.0f;
+            p->vel[2] = 0.0f;
+            p->vel[3] = (float)m_id;  // microbe ID
 
-        p->data[0] = (float)i;        // particle index in microbe
-        p->data[1] = (float)c_start;  // constraint start
-        p->data[2] = (float)XPBD_CONSTRAINTS_PER_MICROBE;
-        p->data[3] = 0.0f;
+            p->data[0] = (float)particle_idx;  // particle index in microbe
+            p->data[1] = (float)c_start;
+            p->data[2] = (float)XPBD_CONSTRAINTS_PER_MICROBE;
+            p->data[3] = 0.0f;
+
+            particle_idx++;
+        }
     }
 
-    // Create constraints
+    // Simplified constraint network for stability
+    float stiffness = AMOEBA_STIFFNESS;
+    float compliance = 1.0f / (stiffness * 100.0f);  // Stiffer for shape retention
     int c_idx = 0;
 
-    // Ring constraints (adjacent particles)
-    for (int i = 0; i < XPBD_PARTICLES_PER_MICROBE; i++) {
-        int j = (i + 1) % XPBD_PARTICLES_PER_MICROBE;
-        XpbdParticle *p1 = &ctx->particles_cpu[p_start + i];
-        XpbdParticle *p2 = &ctx->particles_cpu[p_start + j];
-
-        float dx = p1->pos[0] - p2->pos[0];
-        float dz = p1->pos[2] - p2->pos[2];
-        float rest_len = sqrtf(dx * dx + dz * dz);
-
-        XpbdConstraint *c = &ctx->constraints_cpu[c_start + c_idx];
-        c->p1 = p_start + i;
-        c->p2 = p_start + j;
-        c->rest_length = rest_len;
-        c->compliance = compliance;
-        c->lambda = 0.0f;
-        c_idx++;
+    #define ADD_CONSTRAINT(i1, i2, compl_mult) { \
+        XpbdParticle *p1 = &ctx->particles_cpu[p_start + (i1)]; \
+        XpbdParticle *p2 = &ctx->particles_cpu[p_start + (i2)]; \
+        float dx = p1->pos[0] - p2->pos[0]; \
+        float dz = p1->pos[2] - p2->pos[2]; \
+        float rest_len = sqrtf(dx * dx + dz * dz); \
+        if (rest_len > 0.001f && c_idx < XPBD_CONSTRAINTS_PER_MICROBE) { \
+            XpbdConstraint *c = &ctx->constraints_cpu[c_start + c_idx]; \
+            c->p1 = p_start + (i1); \
+            c->p2 = p_start + (i2); \
+            c->rest_length = rest_len; \
+            c->compliance = compliance * (compl_mult); \
+            c->lambda = 0.0f; \
+            c_idx++; \
+        } \
     }
 
-    // Cross constraints (opposite particles for shape stability)
-    for (int i = 0; i < XPBD_PARTICLES_PER_MICROBE / 2; i++) {
-        int j = i + XPBD_PARTICLES_PER_MICROBE / 2;
-        XpbdParticle *p1 = &ctx->particles_cpu[p_start + i];
-        XpbdParticle *p2 = &ctx->particles_cpu[p_start + j];
-
-        float dx = p1->pos[0] - p2->pos[0];
-        float dz = p1->pos[2] - p2->pos[2];
-        float rest_len = sqrtf(dx * dx + dz * dz);
-
-        XpbdConstraint *c = &ctx->constraints_cpu[c_start + c_idx];
-        c->p1 = p_start + i;
-        c->p2 = p_start + j;
-        c->rest_length = rest_len;
-        c->compliance = compliance * 0.5f;  // Stiffer cross-bracing
-        c->lambda = 0.0f;
-        c_idx++;
+    // Ring adjacency constraints
+    int ring_start[4] = {0, 1, 7, 18};  // Start index of each ring
+    for (int ring = 0; ring < 4; ring++) {
+        int start = ring_start[ring];
+        int count = ring_counts[ring];
+        if (count > 1) {
+            for (int i = 0; i < count; i++) {
+                int j = (i + 1) % count;
+                ADD_CONSTRAINT(start + i, start + j, 1.0f);
+            }
+        }
     }
+
+    // Radial constraints (connecting rings together)
+    // Center to inner ring
+    for (int i = 0; i < 6; i++) {
+        ADD_CONSTRAINT(0, 1 + i, 0.8f);
+    }
+    // Inner to middle ring
+    for (int i = 0; i < 6; i++) {
+        ADD_CONSTRAINT(1 + i, 7 + i, 0.8f);
+        ADD_CONSTRAINT(1 + i, 7 + ((i + 1) % 11), 1.2f);
+    }
+    // Middle to outer ring
+    for (int i = 0; i < 11; i++) {
+        ADD_CONSTRAINT(7 + i, 18 + i, 0.8f);
+        ADD_CONSTRAINT(7 + i, 18 + ((i + 1) % 14), 1.2f);
+    }
+
+    #undef ADD_CONSTRAINT
+
 
     // Fill remaining constraint slots (if any) with dummy constraints
     while (c_idx < XPBD_CONSTRAINTS_PER_MICROBE) {
@@ -609,27 +622,27 @@ void xpbd_spawn_microbe(XpbdContext *ctx, float x, float z, int type, float seed
         c_idx++;
     }
 
-    // Microbe metadata
+    // Microbe metadata - unified amoeba appearance
     XpbdMicrobe *m = &ctx->microbes_cpu[m_id];
     m->center[0] = x;
     m->center[1] = 0.0f;
     m->center[2] = z;
-    m->center[3] = base_radius;
+    m->center[3] = 1.05f;  // Radius (matches outer ring radius)
 
-    m->color[0] = TYPE_COLORS[type][0];
-    m->color[1] = TYPE_COLORS[type][1];
-    m->color[2] = TYPE_COLORS[type][2];
-    m->color[3] = TYPE_COLORS[type][3];
+    m->color[0] = AMOEBA_COLOR[0];
+    m->color[1] = AMOEBA_COLOR[1];
+    m->color[2] = AMOEBA_COLOR[2];
+    m->color[3] = AMOEBA_COLOR[3];
 
-    m->params[0] = (float)type;
+    m->params[0] = 0.0f;  // type (unified)
     m->params[1] = stiffness;
     m->params[2] = seed;
     m->params[3] = 0.0f;  // squish amount
 
-    m->aabb[0] = x - base_radius * elongation;
-    m->aabb[1] = z - base_radius;
-    m->aabb[2] = x + base_radius * elongation;
-    m->aabb[3] = z + base_radius;
+    m->aabb[0] = x - 1.5f;
+    m->aabb[1] = z - 1.5f;
+    m->aabb[2] = x + 1.5f;
+    m->aabb[3] = z + 1.5f;
 
     ctx->microbe_count++;
     ctx->particle_count = ctx->microbe_count * XPBD_PARTICLES_PER_MICROBE;
@@ -653,7 +666,7 @@ void xpbd_clear(XpbdContext *ctx) {
     ctx->constraint_count = 0;
 }
 
-void xpbd_update(XpbdContext *ctx, float dt, float bounds_x, float bounds_y) {
+void xpbd_update(XpbdContext *ctx, float dt, float bounds_x, float bounds_y, float cursor_x, float cursor_z) {
     if (!ctx || !ctx->ready) return;
     if (ctx->particle_count == 0) return;
 
@@ -680,6 +693,7 @@ void xpbd_update(XpbdContext *ctx, float dt, float bounds_x, float bounds_y) {
     glUniform1i(ctx->loc_predict_count, ctx->particle_count);
     glUniform1i(ctx->loc_predict_ppm, XPBD_PARTICLES_PER_MICROBE);
     glUniform1f(ctx->loc_predict_time, (float)GetTime());
+    glUniform2f(ctx->loc_predict_cursor, cursor_x, cursor_z);
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, ctx->particle_ssbo);
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ctx->microbe_ssbo);
     glDispatchCompute(groups_p, 1, 1);
@@ -702,30 +716,46 @@ void xpbd_update(XpbdContext *ctx, float dt, float bounds_x, float bounds_y) {
     glDispatchCompute(groups_p, 1, 1);
     glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 
-    // Step 4: Inter-microbe collisions
-    glUseProgram(ctx->collide_program);
-    glUniform1f(ctx->loc_collide_dt, dt);
-    glUniform2f(ctx->loc_collide_bounds, bounds_x, bounds_y);
-    glUniform1f(ctx->loc_collide_cell, cell);
-    glUniform2i(ctx->loc_collide_dim, grid_dim[0], grid_dim[1]);
-    glUniform1i(ctx->loc_collide_count, ctx->particle_count);
-    glUniform1f(ctx->loc_collide_radius, 0.4f);  // collision radius
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, ctx->particle_ssbo);
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ctx->grid_head_ssbo);
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, ctx->grid_next_ssbo);
-    glDispatchCompute(groups_p, 1, 1);
-    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
-
-    // Step 5: Solve internal constraints (multiple iterations)
-    glUseProgram(ctx->solve_program);
-    glUniform1f(ctx->loc_solve_dt, dt);
-    glUniform1i(ctx->loc_solve_count, ctx->constraint_count);
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, ctx->particle_ssbo);
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ctx->constraint_ssbo);
+    // Step 4 & 5: Iteratively solve collisions AND internal constraints
+    // (Collisions must be inside iteration loop to prevent penetration)
     for (int iter = 0; iter < XPBD_SOLVER_ITERATIONS; iter++) {
+        // Inter-microbe collisions
+        glUseProgram(ctx->collide_program);
+        glUniform1f(ctx->loc_collide_dt, dt);
+        glUniform2f(ctx->loc_collide_bounds, bounds_x, bounds_y);
+        glUniform1f(ctx->loc_collide_cell, cell);
+        glUniform2i(ctx->loc_collide_dim, grid_dim[0], grid_dim[1]);
+        glUniform1i(ctx->loc_collide_count, ctx->particle_count);
+        glUniform1f(ctx->loc_collide_radius, 1.8f);  // Keep microbes separated to prevent visual merging
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, ctx->particle_ssbo);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ctx->grid_head_ssbo);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, ctx->grid_next_ssbo);
+        glDispatchCompute(groups_p, 1, 1);
+        glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+
+        // Internal constraints
+        glUseProgram(ctx->solve_program);
+        glUniform1f(ctx->loc_solve_dt, dt);
+        glUniform1i(ctx->loc_solve_count, ctx->constraint_count);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, ctx->particle_ssbo);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ctx->constraint_ssbo);
         glDispatchCompute(groups_c, 1, 1);
         glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
     }
+
+    // PRESSURE CONSTRAINT DISABLED (ROOT CAUSE)
+    // It was overriding movement forces by directly modifying positions
+    // after the solver, preventing autonomous movement and cursor avoidance.
+    // Shape is maintained by distance constraints alone.
+    //
+    // glUseProgram(ctx->pressure_program);
+    // glUniform1f(ctx->loc_pressure_dt, dt);
+    // glUniform1i(ctx->loc_pressure_count, ctx->microbe_count);
+    // glUniform1i(ctx->loc_pressure_ppm, XPBD_PARTICLES_PER_MICROBE);
+    // glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, ctx->particle_ssbo);
+    // glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ctx->microbe_ssbo);
+    // glDispatchCompute(groups_m, 1, 1);
+    // glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 
     // Step 6: Update velocities
     glUseProgram(ctx->finalize_program);
@@ -751,45 +781,73 @@ void xpbd_update(XpbdContext *ctx, float dt, float bounds_x, float bounds_y) {
 }
 
 void xpbd_render(const XpbdContext *ctx, Camera3D camera) {
-    if (!ctx || !ctx->ready || ctx->microbe_count <= 0 || ctx->render_shader == 0) return;
+    if (!ctx || !ctx->ready || ctx->microbe_count <= 0) return;
+    if (!ctx->field_shader || !ctx->surface_shader) return;
 
     rlDrawRenderBatchActive();
-    glViewport(0, 0, GetRenderWidth(), GetRenderHeight());
+
+    int width = GetRenderWidth();
+    int height = GetRenderHeight();
 
     Matrix view = GetCameraMatrix(camera);
     Matrix proj = MatrixPerspective(DEG2RAD * camera.fovy,
-                                    (float)GetRenderWidth() / (float)GetRenderHeight(),
+                                    (float)width / (float)height,
                                     0.1f, 200.0f);
     Matrix vp = MatrixMultiply(view, proj);
 
-    glUseProgram(ctx->render_shader);
-    if (ctx->loc_render_vp >= 0) {
-        glUniformMatrix4fv(ctx->loc_render_vp, 1, GL_FALSE, MatrixToFloatV(vp).v);
-    }
-    if (ctx->loc_render_time >= 0) {
-        glUniform1f(ctx->loc_render_time, (float)GetTime());
-    }
-    if (ctx->loc_render_ppm >= 0) {
-        glUniform1i(ctx->loc_render_ppm, XPBD_PARTICLES_PER_MICROBE);
-    }
+    // === PASS 1: Accumulate metaball field ===
+    glBindFramebuffer(GL_FRAMEBUFFER, ctx->field_fbo);
+    glViewport(0, 0, width, height);
 
+    // Clear field to zero (black = no influence)
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // Render each particle as a billboard with additive blending
+    glUseProgram(ctx->field_shader);
+    glUniformMatrix4fv(ctx->loc_field_vp, 1, GL_FALSE, MatrixToFloatV(vp).v);
+    glUniform1i(ctx->loc_field_ppm, XPBD_PARTICLES_PER_MICROBE);
+    glUniform1f(ctx->loc_field_radius, 1.2f);  // Particle influence radius (unused now, uses base_radius)
+
+    glEnable(GL_BLEND);
+    glBlendEquation(GL_FUNC_ADD);  // Additive blending for proper metaball field accumulation
+    glBlendFunc(GL_ONE, GL_ONE);
+    glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
+
+    glBindVertexArray(ctx->billboard_vao);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, ctx->particle_ssbo);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ctx->microbe_ssbo);
+    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+
+    // Draw one billboard quad per particle (instanced)
+    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, ctx->particle_count);
+    glBindVertexArray(0);
+
+    // === PASS 2: Render metaball surface ===
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, width, height);
+
+    glUseProgram(ctx->surface_shader);
+    glUniform1i(ctx->loc_surface_field_tex, 0);
+    glUniform1f(ctx->loc_surface_time, (float)GetTime());
+    glUniform1f(ctx->loc_surface_threshold, 1.5f);  // Threshold for filled disc metaballs
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, ctx->field_texture);
+
+    glBlendEquation(GL_FUNC_ADD);  // Reset to normal alpha blending
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDisable(GL_DEPTH_TEST);
 
-    glBindVertexArray(ctx->render_vao);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ctx->render_ebo);
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, ctx->particle_ssbo);
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ctx->microbe_ssbo);
-    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
-    glDrawElementsInstanced(GL_TRIANGLES,
-                            ctx->render_index_count,
-                            GL_UNSIGNED_INT,
-                            (void *)0,
-                            ctx->microbe_count);
+    glBindVertexArray(ctx->quad_vao);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ctx->microbe_ssbo);  // For coloring
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     glBindVertexArray(0);
+
     glUseProgram(0);
+    glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 unsigned int xpbd_get_particle_ssbo(const XpbdContext *ctx) {
@@ -810,6 +868,32 @@ int xpbd_get_particle_count(const XpbdContext *ctx) {
 
 void xpbd_debug_print(const XpbdContext *ctx) {
     if (!ctx) return;
-    fprintf(stderr, "xpbd: %d microbes, %d particles, %d constraints\n",
-            ctx->microbe_count, ctx->particle_count, ctx->constraint_count);
+
+    // Download particle data from GPU
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, ctx->particle_ssbo);
+    glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, ctx->particle_count * sizeof(XpbdParticle), ctx->particles_cpu);
+
+    fprintf(stderr, "\n=== XPBD DEBUG (frame snapshot) ===\n");
+    for (int m = 0; m < ctx->microbe_count; m++) {
+        fprintf(stderr, "Microbe %d:\n", m);
+        int p_start = m * XPBD_PARTICLES_PER_MICROBE;
+
+        // Center particle
+        XpbdParticle *p0 = &ctx->particles_cpu[p_start];
+        fprintf(stderr, "  p0(center): (%.2f, %.2f, %.2f)\n", p0->pos[0], p0->pos[1], p0->pos[2]);
+
+        // Check distances from center
+        float min_dist = 1e10f, max_dist = 0.0f;
+        for (int i = 1; i < XPBD_PARTICLES_PER_MICROBE; i++) {
+            XpbdParticle *p = &ctx->particles_cpu[p_start + i];
+            float dx = p->pos[0] - p0->pos[0];
+            float dz = p->pos[2] - p0->pos[2];
+            float dist = sqrtf(dx*dx + dz*dz);
+            if (dist < min_dist) min_dist = dist;
+            if (dist > max_dist) max_dist = dist;
+        }
+        fprintf(stderr, "  Particle distance from center: min=%.2f max=%.2f\n", min_dist, max_dist);
+    }
+    fprintf(stderr, "=====================================\n\n");
+    fflush(stderr);
 }

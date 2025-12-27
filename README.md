@@ -216,3 +216,22 @@ All threats are:
 * The game rewards understanding systems, not memorization
 
 **Micro-Idle is an idle game where learning how microbes work is how you win.**
+
+---
+
+## **Development Principles**
+
+### **Primary Goal: Complexity Reduction**
+
+The primary goal of all programming work is **complexity reduction while achieving requirements**. Clean, understandable code is not optional.
+
+### **Core Practices**
+
+* **No band-aid fixes** - Find root causes, don't suppress symptoms with emergency checks or arbitrary clamps
+* **Always build and test** - Verify every change works before moving on
+* **Refactor constantly** - Take every opportunity to clean, simplify, and improve code structure
+* **Keep files manageable** - No thousand-line files. Split, organize, and maintain clear boundaries
+* **Try different approaches** - If something doesn't work, try another algorithm. If still stuck, refactor until you find the code smell
+* **Use proven solutions** - Utilize external libraries and established techniques over custom implementations
+* **Clean as you go** - Every change should reduce complexity, not add special cases
+* **Always be improving** - Actively identify areas for cleanup and refactoring

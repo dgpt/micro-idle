@@ -71,14 +71,25 @@ void main() {
                     vec3 normal = delta / dist;
                     float overlap = u_collision_radius - dist;
 
-                    // Push apart (simple position-based collision response)
+                    // Push apart (position-based collision response)
                     // Split based on inverse masses
                     float other_inv_mass = particles[j].pos.w;
                     float total_inv_mass = inv_mass + other_inv_mass;
 
                     if (total_inv_mass > 0.0001) {
                         float ratio = inv_mass / total_inv_mass;
-                        total_push += normal * overlap * ratio * 0.5;
+                        // Gentle, gradual separation for smooth squishing (0.8 = soft)
+                        float push_strength = 0.8;
+                        total_push += normal * overlap * ratio * push_strength;
+
+                        // Strong velocity damping for smooth membrane collision
+                        vec3 relative_vel = p.vel.xyz - particles[j].vel.xyz;
+                        float vel_along_normal = dot(relative_vel, normal);
+                        if (vel_along_normal < 0.0) {
+                            // Heavily damp approaching velocities (60% damping)
+                            p.vel.xyz -= normal * vel_along_normal * 0.6;
+                        }
+
                         collision_count++;
                     }
                 }

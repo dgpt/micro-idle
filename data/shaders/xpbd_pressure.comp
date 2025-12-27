@@ -1,0 +1,87 @@
+#version 430 core
+
+// XPBD Pressure Constraint: Area/volume conservation for membrane stability
+// Maintains realistic amoeba shape through internal pressure
+
+layout(local_size_x = 64) in;
+
+struct Particle {
+    vec4 pos;
+    vec4 pos_prev;
+    vec4 vel;
+    vec4 data;
+};
+
+struct Microbe {
+    vec4 center;
+    vec4 color;
+    vec4 params;
+    vec4 aabb;
+};
+
+layout(std430, binding = 0) buffer Particles { Particle particles[]; };
+layout(std430, binding = 1) buffer Microbes { Microbe microbes[]; };
+
+uniform float u_dt;
+uniform int u_microbe_count;
+uniform int u_particles_per_microbe;
+
+void main() {
+    uint microbe_id = gl_GlobalInvocationID.x;
+    if (microbe_id >= uint(u_microbe_count)) return;
+
+    int particle_start = int(microbe_id) * u_particles_per_microbe;
+    Microbe m = microbes[microbe_id];
+
+    vec3 center = m.center.xyz;
+    float base_radius = m.center.w;
+
+    // === AREA CALCULATION (Shoelace formula for 2D polygon) ===
+    float current_area = 0.0;
+    for (int i = 0; i < u_particles_per_microbe; i++) {
+        int next = (i + 1) % u_particles_per_microbe;
+        vec3 p1 = particles[particle_start + i].pos.xyz;
+        vec3 p2 = particles[particle_start + next].pos.xyz;
+
+        // Project to XZ plane
+        current_area += (p1.x * p2.z - p2.x * p1.z);
+    }
+    current_area = abs(current_area) * 0.5;
+
+    // Target area (circle)
+    float target_area = 3.14159265 * base_radius * base_radius;
+
+    // Area deviation
+    float area_ratio = current_area / max(target_area, 0.001);
+    float area_error = 1.0 - area_ratio;
+
+    // Only apply if significantly deviating
+    if (abs(area_error) < 0.03) return;
+
+    // === PRESSURE CORRECTION ===
+    // Applies radial force to restore target area
+    // Strength depends on how much we're compressed/expanded
+
+    float pressure_strength = area_error * 0.25;  // Moderate strength
+
+    // Apply to each particle
+    for (int i = 0; i < u_particles_per_microbe; i++) {
+        int p_idx = particle_start + i;
+        Particle p = particles[p_idx];
+
+        float inv_mass = p.pos.w;
+        if (inv_mass < 0.0001) continue;
+
+        vec3 to_particle = p.pos.xyz - center;
+        float dist = length(to_particle);
+
+        if (dist < 0.01) continue;
+
+        vec3 radial = normalize(to_particle);
+
+        // Radial correction (outward if compressed, inward if expanded)
+        vec3 correction = radial * pressure_strength * base_radius * 0.3;
+
+        particles[p_idx].pos.xyz += correction * inv_mass;
+    }
+}

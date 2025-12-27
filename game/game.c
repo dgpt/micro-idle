@@ -22,6 +22,8 @@ typedef struct GameState {
     GameConfig config;
     int screen_w;
     int screen_h;
+    float cursor_world_x;
+    float cursor_world_z;
 } GameState;
 
 static int parse_env_int(const char *name, int fallback) {
@@ -53,7 +55,7 @@ static float parse_env_float(const char *name, float fallback) {
 static GameConfig game_load_config(void) {
     GameConfig config = {0};
     config.max_count = parse_env_int("MICRO_IDLE_ENTITY_COUNT", 500);
-    config.spawn_initial = parse_env_int("MICRO_IDLE_INITIAL_ENTITIES", 100);
+    config.spawn_initial = parse_env_int("MICRO_IDLE_INITIAL_ENTITIES", 2);
     if (config.spawn_initial > config.max_count) {
         config.spawn_initial = config.max_count;
     }
@@ -112,16 +114,12 @@ bool game_init(GameState *game, uint64_t seed) {
         return false;
     }
 
-    // Spawn initial microbes
+    // Spawn initial microbes at fixed positions (far apart to avoid interaction)
     for (int i = 0; i < game->config.spawn_initial; i++) {
-        float x = ((float)(seed % 1000) / 500.0f - 1.0f) * game->config.bounds_x * 0.8f;
-        seed = seed * 6364136223846793005ULL + 1442695040888963407ULL;
-        float z = ((float)(seed % 1000) / 500.0f - 1.0f) * game->config.bounds_z * 0.8f;
-        seed = seed * 6364136223846793005ULL + 1442695040888963407ULL;
-        int type = (int)(seed % 4);
-        seed = seed * 6364136223846793005ULL + 1442695040888963407ULL;
-        float s = (float)(seed % 1000) / 1000.0f;
-        seed = seed * 6364136223846793005ULL + 1442695040888963407ULL;
+        float x = (i == 0) ? -5.0f : 5.0f;  // Fixed positions far apart
+        float z = 0.0f;
+        int type = 0;
+        float s = 0.5f;  // Same seed for identical behavior
         xpbd_spawn_microbe(game->xpbd, x, z, type, s);
     }
 
@@ -129,7 +127,6 @@ bool game_init(GameState *game, uint64_t seed) {
 }
 
 void game_handle_input(GameState *game, Camera3D camera, float dt, int screen_w, int screen_h) {
-    (void)camera;
     (void)dt;
     if (!game) return;
 
@@ -148,13 +145,29 @@ void game_handle_input(GameState *game, Camera3D camera, float dt, int screen_w,
         game->config.bounds_x = plane_w * 0.42f;
         game->config.bounds_z = plane_h * 0.42f;
     }
+
+    // Get mouse position and convert to world coordinates
+    Vector2 mouse_pos = GetMousePosition();
+    Ray ray = GetScreenToWorldRay(mouse_pos, camera);
+
+    // Intersect with Y=0 plane (where microbes live)
+    float t = -ray.position.y / ray.direction.y;
+    game->cursor_world_x = ray.position.x + ray.direction.x * t;
+    game->cursor_world_z = ray.position.z + ray.direction.z * t;
+
+    // DEBUG: Print cursor world position every 60 frames
+    static int frame_count = 0;
+    if (++frame_count % 60 == 0) {
+        printf("DEBUG: cursor world pos: (%.2f, %.2f)\n", game->cursor_world_x, game->cursor_world_z);
+    }
 }
 
 void game_update_fixed(GameState *game, float dt) {
     if (!game || !game->xpbd) {
         return;
     }
-    xpbd_update(game->xpbd, dt, game->config.bounds_x, game->config.bounds_z);
+    xpbd_update(game->xpbd, dt, game->config.bounds_x, game->config.bounds_z,
+                game->cursor_world_x, game->cursor_world_z);
 }
 
 void game_render(const GameState *game, Camera3D camera, float alpha) {

@@ -10,7 +10,100 @@
 
 ---
 
-## 2) Stack
+## 2) Development Requirements
+
+### 2.1 Scope
+
+This section defines mandatory development practices and quality requirements for all code contributions to the Micro-Idle project.
+
+### 2.2 Objective
+
+The primary objective of all development activities MUST be **complexity reduction while achieving functional requirements**. Code clarity, maintainability, and simplicity are first-order concerns, not optional qualities.
+
+### 2.3 Normative Requirements
+
+#### 2.3.1 Root Cause Analysis (Mandatory)
+
+**REQ-001**: When encountering defects, instability, or unintended behavior, developers MUST identify and address the root cause.
+
+**REQ-002**: Developers MUST NOT introduce compensatory mechanisms that mask symptoms, including but not limited to:
+- Emergency correction systems triggered by threshold violations
+- Arbitrary bounds or clamps applied to suppress extremes
+- Out-of-band validation checks compensating for upstream logic errors
+- Conditional branches that special-case problematic states
+
+**REQ-003**: If a proposed fix does not address the root cause, it MUST be rejected regardless of whether it suppresses the observable symptom.
+
+**Rationale**: Symptomatic fixes create feedback loops, accumulate technical debt exponentially, and obscure root causes during debugging.
+
+**Example of non-compliance**:
+```
+// VIOLATION of REQ-002
+if (microbe_area < MIN_THRESHOLD) {
+    // Emergency inflation
+    apply_expansion_force(EMERGENCY_MULTIPLIER);
+}
+```
+
+**Example of compliance**:
+```
+// COMPLIANT: Root cause fix
+// Moved pressure constraint outside solver loop to eliminate
+// oscillation feedback (see commit a3f8c91)
+```
+
+#### 2.3.2 Verification (Mandatory)
+
+**REQ-004**: Developers MUST build the project after every logical change unit that modifies source code or build configuration.
+
+**REQ-005**: Developers MUST execute relevant test suites to verify correctness before considering a logic change complete.
+
+**REQ-006**: Developers MUST NOT proceed to subsequent changes without confirming current changes produce expected behavior.
+
+**Note**: Documentation-only changes do not require build verification unless they modify build scripts or configuration.
+
+#### 2.3.3 Continuous Refactoring (Mandatory)
+
+**REQ-007**: Developers MUST actively refactor code to reduce complexity whenever opportunity arises.
+
+**REQ-008**: Each modification MUST reduce overall system complexity or, at minimum, maintain complexity neutrality. Complexity-increasing changes require explicit justification.
+
+**REQ-009**: Developers MUST identify and eliminate code smells during normal development activity, not defer cleanup to future work.
+
+**REQ-010**: Individual source files MUST NOT exceed reasonable size limits. Files approaching 1000 lines MUST be split into logical modules with clear separation of concerns.
+
+#### 2.3.4 Algorithm Selection (Mandatory)
+
+**REQ-011**: When a current implementation approach cannot satisfy requirements, developers MUST replace the algorithm entirely rather than extend it with special cases.
+
+**REQ-012**: Developers MUST utilize established libraries, proven techniques, and reference implementations in preference to custom solutions.
+
+**REQ-013**: Developers MUST consult academic literature, reference implementations, and domain expertise when selecting algorithms.
+
+#### 2.3.5 Problem-Solving Protocol (Mandatory)
+
+**REQ-014**: When an approach fails to achieve requirements, developers MUST:
+1. Attempt an alternative algorithm or technique
+2. If alternative approaches fail, systematically refactor the surrounding codebase until the root cause or design flaw is identified
+3. Address the identified flaw rather than working around it
+
+**REQ-015**: Developers MUST NOT accept persistent failures. If a solution path is not converging, the problem definition or architectural approach is incorrect and MUST be reevaluated.
+
+### 2.4 Code Quality Standards
+
+**REQ-016**: All code MUST prioritize readability and maintainability over cleverness or brevity.
+
+**REQ-017**: Complexity MUST be justified by requirements. Unjustified complexity MUST be eliminated.
+
+**REQ-018**: Every modification MUST leave the codebase in a cleaner state than before the change.
+
+### 2.5 Compliance
+
+Non-compliance with requirements marked "Mandatory" is not permitted. Code review MUST verify adherence to these requirements before merge.
+
+---
+
+## 3) Stack
 
 - **Language:** C11
 - **Framework:** raylib 5.5 (window/input/audio/rlgl)
@@ -21,7 +114,7 @@
 
 ---
 
-## 3) Repository Layout (Contract)
+## 4) Repository Layout (Contract)
 
 ```
 /engine
@@ -47,7 +140,7 @@ ARCHITECTURE.md
 
 ---
 
-## 4) Build & Targets
+## 5) Build & Targets
 
 CMake targets:
 
@@ -63,7 +156,7 @@ Important build settings:
 
 ---
 
-## 5) Engine/Platform Layer
+## 6) Engine/Platform Layer
 
 `engine/platform` wraps minimal platform responsibilities:
 
@@ -89,7 +182,7 @@ typedef struct EngineContext {
 
 ---
 
-## 6) GPU-Driven Simulation (Core Requirement)
+## 7) GPU-Driven Simulation (Core Requirement)
 
 The **only** simulation path is GPU-based. CPU work is limited to input, high-level orchestration, and UI.
 
@@ -141,7 +234,7 @@ The CPU never iterates over all entities per-frame.
 
 ---
 
-## 7) Rendering & Visuals
+## 8) Rendering & Visuals
 
 - A single instanced draw renders microbes.
 - Shaders handle translucency, internal structure cues, and subtle motion.
@@ -149,7 +242,7 @@ The CPU never iterates over all entities per-frame.
 
 ---
 
-## 8) Tests & Coverage
+## 9) Tests & Coverage
 
 - Tests live in `/tests` and include GPU integration tests.
 - Coverage gate: **95%+** across core modules.
@@ -157,7 +250,7 @@ The CPU never iterates over all entities per-frame.
 
 ---
 
-## 9) Data & Assets
+## 10) Data & Assets
 
 - `data/raw` holds source assets.
 - `data/shaders` holds GLSL sources.
@@ -165,7 +258,7 @@ The CPU never iterates over all entities per-frame.
 
 ---
 
-## 10) Roadmap Notes
+## 11) Roadmap Notes
 
 - `engine/render` and `engine/assets` will expand as visuals and content scale.
 - `engine/io` will host VFS and pack reader logic.
