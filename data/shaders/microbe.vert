@@ -59,9 +59,18 @@ void main() {
     float speed = length(e.vel.xz);
     vec2 dir = speed > 0.001 ? normalize(e.vel.xz) : vec2(cos(seed * 6.28), sin(seed * 6.28));
 
-    // Normalize local quad to [-1, 1]
-    const float baseSpan = 1.4;
+    // Normalize circle-fan vertices to [-1, 1] radius with generous padding
+    // Match radius in gpu_sim.c (init_quad) to prevent clipping under deformation.
+    const float baseSpan = 6.0;
     vec2 local = aPos.xz / baseSpan;
+
+    // Direction-aligned squish and safety padding (per-type)
+    float padding = 0.4 + squish * 0.5;
+    int itype = int(type);
+    padding += (itype == 3 ? 0.6 : 0.0); // spirillum
+    padding += (itype == 4 ? 0.5 : 0.0); // amoeboid
+    padding += (itype == 5 ? 0.3 : 0.0); // diatom
+    local *= (1.0 + padding);
 
     // Direction-aligned squish
     mat2 rot = rotate2(atan(dir.y, dir.x));
@@ -75,7 +84,6 @@ void main() {
     float breathe = 1.0 + sin(t * (0.8 + seed * 0.4) + seed * 6.28) * 0.05;
     local *= breathe;
 
-    int itype = int(type);
     if (itype == 1) { // Bacillus capsule
         local.x *= 1.5;
         local.y *= 0.65;

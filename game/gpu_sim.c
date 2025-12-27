@@ -147,33 +147,56 @@ static unsigned int link_program(unsigned int shader) {
 }
 
 static void init_quad(GpuSim *sim) {
-    // Slightly oversized quad so curved/flagellated sprites are not clipped at the edges.
-    const float s = 1.4f;
-    float verts[] = {
-        -s, 0.0f, -s,
-         s, 0.0f, -s,
-         s, 0.0f,  s,
-        -s, 0.0f,  s
-    };
-    unsigned short indices[] = {0, 1, 2, 2, 3, 0};
+    // Oversized instanced mesh (circle fan) so deformed sprites are never clipped at the edges.
+    // Higher tessellation avoids nonlinear warps overflowing the convex hull.
+    const float radius = 6.0f;
+    const int segments = 32;
+    const int vert_count = segments + 2; // center + segments + repeat first rim
+    const int index_count = segments * 3;
+
+    float *verts = (float *)malloc(sizeof(float) * 3 * (size_t)vert_count);
+    unsigned short *indices = (unsigned short *)malloc(sizeof(unsigned short) * (size_t)index_count);
+    if (!verts || !indices) {
+        free(verts);
+        free(indices);
+        return;
+    }
+
+    // Center
+    verts[0] = 0.0f; verts[1] = 0.0f; verts[2] = 0.0f;
+    for (int i = 0; i <= segments; i++) {
+        float angle = (float)i / (float)segments * 6.28318530718f;
+        int base = (i + 1) * 3;
+        verts[base + 0] = cosf(angle) * radius;
+        verts[base + 1] = 0.0f;
+        verts[base + 2] = sinf(angle) * radius;
+    }
+
+    for (int i = 0; i < segments; i++) {
+        indices[i * 3 + 0] = 0;
+        indices[i * 3 + 1] = (unsigned short)(i + 1);
+        indices[i * 3 + 2] = (unsigned short)(i + 2);
+    }
 
     glGenVertexArrays(1, &sim->vao);
     glBindVertexArray(sim->vao);
 
     glGenBuffers(1, &sim->vbo);
     glBindBuffer(GL_ARRAY_BUFFER, sim->vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 3 * (size_t)vert_count, verts, GL_STATIC_DRAW);
 
     glGenBuffers(1, &sim->ebo);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sim->ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(unsigned short) * (size_t)index_count, indices, GL_STATIC_DRAW);
 
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
 
     glBindVertexArray(0);
 
-    sim->indices_count = 6;
+    sim->indices_count = index_count;
+    free(verts);
+    free(indices);
 }
 
 static bool init_entities(GpuSim *sim, int count) {
