@@ -35,6 +35,18 @@ void main() {
     int particle_id = gl_InstanceID;
     Particle p = particles[particle_id];
 
+    // Render ONLY skeleton particles - they're the ones that actually deform with pseudopods
+    bool is_membrane = (p.data.w > 0.5);
+    if (is_membrane) {
+        // Skip membrane ring - it doesn't follow pseudopod shape
+        gl_Position = vec4(0, 0, -10, 1);
+        vBillboardUV = vec2(0);
+        vMicrobeID = 0.0;
+        vParticleWorldPos = vec3(0);
+        vInfluenceRadius = 0.0;
+        return;
+    }
+
     vec3 particlePos = p.pos.xyz;
     float microbe_id = p.vel.w;
     int m_id = int(microbe_id + 0.5);
@@ -43,11 +55,10 @@ void main() {
     Microbe m = microbes[m_id];
     float base_radius = m.center.w;
 
-    // Billboard size scaled to ensure full coverage
-    float billboardSize = 0.7;  // Larger radius for better overlap and center fill
+    // Moderate billboards - let skeleton shape show through
+    float billboardSize = 0.7;
 
     // Create billboard in world space (aligned to XZ plane for top-down view)
-    // Y=0 plane, billboards expand in X and Z
     vec3 right = vec3(1, 0, 0);
     vec3 forward = vec3(0, 0, 1);
 
@@ -55,8 +66,8 @@ void main() {
 
     gl_Position = u_vp * vec4(worldPos, 1.0);
 
-    vBillboardUV = aCorner;  // -1 to 1
+    vBillboardUV = aCorner;
     vMicrobeID = microbe_id;
     vParticleWorldPos = particlePos;
-    vInfluenceRadius = base_radius * 0.9;  // Influence radius slightly smaller than billboard
+    vInfluenceRadius = base_radius * 0.9;
 }

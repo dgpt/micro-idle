@@ -15,16 +15,15 @@ void main() {
     float dist = length(vBillboardUV);
     if (dist > 1.0) discard;
 
-    // Smooth Gaussian-like falloff for better blending
+    // Smooth falloff for membrane blending
     float r = dist;
     float field = 1.0 - r * r;  // Quadratic falloff
     field = max(0.0, field);
 
-    // Field strength tuned for filled disc with 4 rings
-    field *= 6.0;
+    // Strong field so membrane particles merge into one smooth boundary
+    field *= 15.0;
 
     // Weight microbe ID by field strength for proper accumulation
-    // When we divide by total field in surface shader, we get correct average ID
     float weighted_id = field * vMicrobeID;
 
     outField = vec4(field, weighted_id, 0.0, 1.0);

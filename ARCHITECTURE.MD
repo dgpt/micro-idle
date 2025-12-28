@@ -97,6 +97,8 @@ if (microbe_area < MIN_THRESHOLD) {
 
 **REQ-018**: Every modification MUST leave the codebase in a cleaner state than before the change.
 
+**REQ-019**: Debug output, logging, screenshots, and diagnostic code MUST NOT be added to production game logic. All debugging and diagnosis MUST be done through proper tests in `/tests`.
+
 ### 2.5 Compliance
 
 Non-compliance with requirements marked "Mandatory" is not permitted. Code review MUST verify adherence to these requirements before merge.
@@ -105,12 +107,13 @@ Non-compliance with requirements marked "Mandatory" is not permitted. Code revie
 
 ## 3) Stack
 
-- **Language:** C11
+- **Language:** C++17
 - **Framework:** raylib 5.5 (window/input/audio/rlgl)
-- **Graphics:** OpenGL 4.6 compute + SSBOs
+- **Physics:** Bullet Physics 3.25 with OpenCL GPU solver
+- **Graphics:** OpenGL 4.6 (rendering/shaders) + SSBOs
   - We run on **zink** (Mesa Vulkan -> OpenGL) for 4.6 core features.
-  - `bin/main.c` sets `MESA_LOADER_DRIVER_OVERRIDE=zink` on Linux.
-- **No CPU mode:** The game always runs in GPU mode.
+  - `bin/main.cpp` sets `MESA_LOADER_DRIVER_OVERRIDE=zink` on Linux.
+- **GPU-accelerated:** Physics runs on GPU via Bullet OpenCL, rendering via OpenGL compute/fragment shaders
 
 ---
 
@@ -182,63 +185,143 @@ typedef struct EngineContext {
 
 ---
 
-## 7) GPU-Driven Simulation (Core Requirement)
+## 7) GPU-Accelerated Physics & Rendering
 
-The **only** simulation path is GPU-based. CPU work is limited to input, high-level orchestration, and UI.
+Physics simulation runs on GPU via **Bullet Physics OpenCL solver**. Rendering uses OpenGL shaders with GPU instancing. CPU handles high-level orchestration, input, and UI only.
 
-### Physics Architecture: XPBD (Extended Position Based Dynamics)
+### Physics Architecture: Bullet Soft Body Dynamics
 
-We use **XPBD** for soft-body physics, based on the [Macklin et al. paper](http://mmacklin.com/xpbd.pdf). This provides:
-- Stable, iteration-independent stiffness via compliance parameters
-- Natural soft-body deformation through constraint solving
-- GPU-parallelizable constraint projection
+We use **Bullet Physics** soft body simulation with OpenCL GPU acceleration:
+- **Proven library**: Battle-tested physics engine used in games and simulation
+- **OpenCL GPU solver**: Parallel constraint solving on GPU for performance at scale
+- **Soft body nodes**: Particles connected by distance constraints (links)
+- **Material properties**: Configurable stiffness, damping, friction per microbe type
+- **Collision detection**: Bullet's broad-phase + narrow-phase with soft contact response
 
-### Two-Layer Simulation Model
+### Microbe Body Plan System
+
+Each microbe type has a unique **body plan** defining its physical structure:
+
+```cpp
+struct MicrobeBodyPlan {
+    int skeletonCount;              // Internal structural nodes
+    int membraneCount;              // Outer elastic nodes
+    vector<Vec3> skeletonPositions; // Relative to center
+    vector<Vec3> membranePositions; // Outer boundary
+    vector<ConstraintDef> constraints; // Links between nodes
+    float stiffness;                // Material stiffness
+    float damping;                  // Damping factor
+};
+```
+
+**Example Body Plans**:
+- **Amoeba**: 16 skeleton (3 rings) + 16 membrane (circle) = 32 nodes, low stiffness
+- **Stentor**: 20 trumpet nodes + 10 contractile stalk nodes, moderate stiffness
+- **Lacrymaria**: 16 body + 30 neck chain nodes, very low neck stiffness
+- **Diatom**: 8 rigid frustule nodes, infinite stiffness (rigid body)
+
+### Two-Layer Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  PHYSICS LAYER (Low-res particle clusters)                  │
-│  - Each microbe = 8-16 particles in a ring/blob             │
-│  - Distance constraints maintain shape                       │
-│  - Collisions between microbes via particle proximity        │
-│  - XPBD solver runs on GPU compute shaders                  │
+│  PHYSICS LAYER (Bullet Soft Bodies)                         │
+│  - Each microbe = btSoftBody with type-specific node count  │
+│  - Nodes connected by distance constraints (btLink)         │
+│  - Bullet OpenCL solver runs constraint solving on GPU      │
+│  - Inter-microbe collisions via Bullet contact detection    │
+│  - EC&M forces applied as external forces to nodes          │
 └─────────────────────────────────────────────────────────────┘
                               │
-                              ▼ (particle positions drive deformation)
+                              ▼ (sync node positions to SSBOs)
 ┌─────────────────────────────────────────────────────────────┐
-│  RENDER LAYER (High-res visual mesh)                        │
-│  - Smooth visual hull generated from particle positions     │
-│  - Vertex shader interpolates between particle positions    │
-│  - Fragment shader adds biological detail (membrane, etc.)  │
+│  RENDER LAYER (Metaball Surface)                            │
+│  - Smooth organic surface via metaball field rendering      │
+│  - All nodes render as billboards with alpha blending       │
+│  - Fragment shader computes metaball field: Σ(r²/d²)        │
+│  - Threshold field for surface boundary                     │
+│  - Skeleton nodes darker (organelles), membrane lighter     │
+│  - Surface deforms naturally with node movement             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### XPBD Algorithm (per frame)
+### Collision Requirements
 
-1. **Predict**: Apply external forces, predict new positions
-2. **Build spatial grid**: For broad-phase collision detection
-3. **Generate collision constraints**: Between nearby particles of different microbes
-4. **Solve constraints** (N iterations):
-   - For each constraint: compute Δλ = -(C + α̃λ) / (Σw|∇C|² + α̃)
-   - Apply position correction: x += w·Δλ·∇C
-5. **Update velocities**: v = (x - x_prev) / dt
+**REQ-COLLISION-001**: Microbes MUST collide with each other when their visual surfaces overlap, causing visible squishing and deformation.
 
-### Data Layout (SSBOs)
+**REQ-COLLISION-002**: Collision response MUST be soft and elastic, allowing microbes to compress against each other like soft gel bodies.
 
-- **Particles**: position, velocity, inverse mass, microbe ID
-- **Constraints**: particle indices, rest length, compliance, λ accumulator
-- **Microbes**: center of mass, rotation, type, visual parameters
-- **Spatial Grid**: head + next buffers for broad-phase
+**REQ-COLLISION-003**: After collision, microbes MUST separate smoothly with a gentle bounce, not stick together or penetrate.
 
-The CPU never iterates over all entities per-frame.
+**REQ-COLLISION-004**: Collision radius MUST match the visual size of rendered microbes (metaball surface extent, not just particle centers).
+
+**Implementation**:
+- Bullet's btSoftRigidDynamicsWorld handles all collision detection
+- Soft body contact parameters tuned for gel-like feel
+- Collision margin matches metaball visual extent
+- Material friction/restitution for controlled bouncing
+
+### Amoeba Locomotion: EC&M Model (Hybrid Approach)
+
+**Excitable Cortex & Memory (EC&M)** algorithm integrated with Bullet:
+
+1. **12-second cycle**: Extend (0-35%), Search (35-75%), Retract (75-100%)
+2. **Pseudopod selection**: One membrane node chosen per cycle
+3. **Force application**:
+   - Extension: `btSoftBody->addForce(outward_dir * strength, node_idx)`
+   - Search: Lateral wiggle (perpendicular force)
+   - Retraction: Opposite direction force
+4. **Bullet integration**: Forces drive soft body naturally via constraint solver
+
+### Physics Update Pipeline (per frame)
+
+1. **Apply external forces**: EC&M pseudopod forces, cursor attraction, bounds
+2. **Step Bullet simulation**: `world->stepSimulation(dt, iterations, dt)`
+3. **Sync to SSBOs**: Download node positions from Bullet → CPU buffer → GPU SSBO
+4. **Update microbe centers**: Compute center of mass from node positions
+
+### Data Layout (SSBOs for Rendering)
+
+- **Particles**: `vec4 pos, vec4 pos_prev, vec4 vel (xyz + microbe_id), vec4 data (is_membrane flag)`
+- **Microbes**: `vec4 center, vec4 color, vec4 params (type, stiffness, seed), vec4 aabb`
+
+SSBOs maintain compatibility with rendering system while physics runs in Bullet.
 
 ---
 
 ## 8) Rendering & Visuals
 
-- A single instanced draw renders microbes.
-- Shaders handle translucency, internal structure cues, and subtle motion.
-- Any mesh details and animation are driven by GPU data, not CPU loops.
+### Metaball Rendering System
+
+Microbes render as **organic deformable metaballs** showing internal structure:
+
+**Technique**:
+1. **GPU instancing**: One instanced draw call renders all particle billboards
+2. **Metaball field**: Fragment shader computes `field = Σ(r²/d²)` for nearby particles
+3. **Surface threshold**: Discard fragments below iso-value (e.g., 0.5)
+4. **Alpha blending**: Smooth transparency based on field gradient
+5. **Internal structure**: Skeleton nodes render darker (organelles), membrane nodes lighter
+
+**Shader Pipeline**:
+- **Vertex shader**: Billboard particles in world space (2 triangles per particle)
+- **Fragment shader**:
+  - Compute distance to particle center
+  - Calculate metaball contribution
+  - Threshold for surface boundary
+  - Modulate alpha by field strength (thick = opaque, thin = transparent)
+  - Color variation (skeleton dark, membrane light, pseudopod tips bright)
+
+**Type-Specific Variants**:
+- **Soft deformable** (amoeba, stentor): Full metaball blending
+- **Spiked** (heliozoa, radiolarian): Thin line rendering for axopodia/spines
+- **Rigid** (diatom): Geometric shell with hard edges
+- **Ciliated** (stentor): Motion blur or flow lines around cilia
+
+**Advantages**:
+- Naturally organic, blob-like appearance
+- Shows internal organelles through semi-transparent membrane
+- Thin pseudopods render correctly (field varies with deformation)
+- Single system handles diverse microbe morphologies
+- Deformation reflects physics state in real-time
 
 ---
 

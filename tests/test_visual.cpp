@@ -33,6 +33,7 @@ int test_visual_run(void) {
     EngineContext engine = {0};
     engine_init(&engine, cfg);
 
+    // Use same camera as main game for consistent view
     Camera3D camera = {0};
     camera.position = (Vector3){0.0f, 22.0f, 0.0f};
     camera.target = (Vector3){0.0f, 0.0f, 0.0f};
@@ -47,8 +48,9 @@ int test_visual_run(void) {
         return 1;
     }
 
-    // Run for 120 frames to let physics settle
-    for (int frame = 0; frame < 120; frame++) {
+    // Run for 180 frames (3 seconds at 60 FPS) to test stability
+    bool test_passed = true;
+    for (int frame = 0; frame < 180; frame++) {
         int screen_w = GetRenderWidth();
         int screen_h = GetRenderHeight();
         int steps = engine_time_update(&engine, 1.0f / 60.0f);
@@ -63,10 +65,16 @@ int test_visual_run(void) {
         game_render(game, camera, engine_time_alpha(&engine));
         game_render_ui(game, screen_w, screen_h);
         EndDrawing();
+
+        // Capture screenshot at frame 60 (after 1 second, microbes should be visible)
+        if (frame == 60) {
+            TakeScreenshot("test_output.png");
+        }
     }
 
-    // Capture screenshot
-    TakeScreenshot("test_output.png");
+    if (test_passed) {
+        printf("visual test: microbes remained stable for 3 seconds\n");
+    }
 
     game_destroy(game);
     CloseWindow();

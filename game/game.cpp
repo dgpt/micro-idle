@@ -6,7 +6,7 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "game/xpbd.h"
+#include "game/physics.h"
 
 typedef struct GameConfig {
     int max_count;
@@ -18,7 +18,7 @@ typedef struct GameConfig {
 } GameConfig;
 
 typedef struct GameState {
-    XpbdContext *xpbd;
+    PhysicsContext *physics;
     GameConfig config;
     int screen_w;
     int screen_h;
@@ -82,8 +82,8 @@ void game_destroy(GameState *game) {
     if (!game) {
         return;
     }
-    if (game->xpbd) {
-        xpbd_destroy(game->xpbd);
+    if (game->physics) {
+        game->physics->destroy();
     }
     free(game);
 }
@@ -104,23 +104,33 @@ bool game_init(GameState *game, uint64_t seed) {
     float plane_w = plane_h * aspect * 1.15f;
     game->config.plane_width = plane_w;
     game->config.plane_height = plane_h;
-    game->config.bounds_x = plane_w * 0.42f;  // Keep microbes slightly inward
-    game->config.bounds_z = plane_h * 0.42f;
 
-    // Create XPBD physics system
-    game->xpbd = xpbd_create(game->config.max_count);
-    if (!game->xpbd) {
-        fprintf(stderr, "game: failed to create XPBD context\n");
+    // Bounds match visible screen area (87% of plane with padding accounts for actual screen edges)
+    game->config.bounds_x = plane_w * 0.435f;
+    game->config.bounds_z = plane_h * 0.435f;
+
+    // Create Bullet physics system
+    game->physics = PhysicsContext::create(game->config.max_count);
+    if (!game->physics) {
+        fprintf(stderr, "game: failed to create PhysicsContext\n");
         return false;
     }
 
-    // Spawn initial microbes
+    // Spawn initial microbes spread across the play area
+    // Use a simple hash for pseudo-random but deterministic placement
     for (int i = 0; i < game->config.spawn_initial; i++) {
-        float x = (i == 0) ? -5.0f : 5.0f;
-        float z = 0.0f;
-        int type = 0;
-        float s = (float)i * 0.1f;  // Different seed per microbe
-        xpbd_spawn_microbe(game->xpbd, x, z, type, s);
+        float seed = (float)i * 0.1f;
+
+        // Deterministic pseudo-random position using hash
+        float hash1 = fmodf(sinf(seed * 12.9898f) * 43758.5453123f, 1.0f);
+        float hash2 = fmodf(sinf(seed * 78.233f) * 43758.5453123f, 1.0f);
+
+        // Spawn INSIDE the visible bounds (not off-screen)
+        // Use 80% of bounds to leave some margin from edges
+        float x = (hash1 - 0.5f) * (game->config.bounds_x * 2.0f * 0.8f);
+        float z = (hash2 - 0.5f) * (game->config.bounds_z * 2.0f * 0.8f);
+
+        game->physics->spawnMicrobe(x, z, MicrobeType::AMOEBA, seed);
     }
 
     return true;
@@ -142,8 +152,10 @@ void game_handle_input(GameState *game, Camera3D camera, float dt, int screen_w,
         float plane_w = plane_h * aspect * 1.15f;
         game->config.plane_width = plane_w;
         game->config.plane_height = plane_h;
-        game->config.bounds_x = plane_w * 0.42f;
-        game->config.bounds_z = plane_h * 0.42f;
+
+        // Bounds match visible screen area
+        game->config.bounds_x = plane_w * 0.435f;
+        game->config.bounds_z = plane_h * 0.435f;
     }
 
     // Get mouse position and convert to world coordinates
@@ -157,16 +169,16 @@ void game_handle_input(GameState *game, Camera3D camera, float dt, int screen_w,
 }
 
 void game_update_fixed(GameState *game, float dt) {
-    if (!game || !game->xpbd) {
+    if (!game || !game->physics) {
         return;
     }
-    xpbd_update(game->xpbd, dt, game->config.bounds_x, game->config.bounds_z,
-                game->cursor_world_x, game->cursor_world_z);
+    game->physics->update(dt, game->config.bounds_x, game->config.bounds_z,
+                          game->cursor_world_x, game->cursor_world_z);
 }
 
 void game_render(const GameState *game, Camera3D camera, float alpha) {
     (void)alpha;
-    if (!game || !game->xpbd) {
+    if (!game || !game->physics) {
         return;
     }
 
@@ -175,18 +187,44 @@ void game_render(const GameState *game, Camera3D camera, float alpha) {
               (Vector2){game->config.plane_width, game->config.plane_height},
               (Color){10, 20, 30, 255});
 
-    xpbd_render(game->xpbd, camera);
+    game->physics->render(camera);
 
     EndMode3D();
 }
 
 void game_render_ui(GameState *game, int screen_w, int screen_h) {
-    if (!game || !game->xpbd) {
+    if (!game || !game->physics) {
         return;
     }
 
     DrawRectangle(12, 12, 280, 80, (Color){10, 10, 20, 200});
     DrawText("Micro-Idle", 20, 20, 16, RAYWHITE);
-    DrawText(TextFormat("Microbes: %d", xpbd_get_microbe_count(game->xpbd)), 20, 42, 12, GRAY);
+    DrawText(TextFormat("Microbes: %d", game->physics->getMicrobeCount()), 20, 42, 12, GRAY);
     DrawText(TextFormat("Screen: %dx%d", screen_w, screen_h), 20, 60, 12, GRAY);
+}
+
+int game_get_particle_count(const GameState *game) {
+    return (game && game->physics) ? game->physics->getParticleCount() : 0;
+}
+
+int game_get_microbe_count(const GameState *game) {
+    return (game && game->physics) ? game->physics->getMicrobeCount() : 0;
+}
+
+float game_get_microbe_volume(const GameState *game, int index) {
+    return (game && game->physics) ? game->physics->getMicrobeVolume(index) : 0.0f;
+}
+
+float game_get_microbe_radius(const GameState *game, int index) {
+    return (game && game->physics) ? game->physics->getMicrobeMaxRadius(index) : 0.0f;
+}
+
+void game_get_microbe_position(const GameState *game, int index, float* x, float* y, float* z) {
+    if (game && game->physics) {
+        game->physics->getMicrobeCenterOfMass(index, x, y, z);
+    } else {
+        if (x) *x = 0.0f;
+        if (y) *y = 0.0f;
+        if (z) *z = 0.0f;
+    }
 }

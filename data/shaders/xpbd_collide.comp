@@ -78,16 +78,16 @@ void main() {
 
                     if (total_inv_mass > 0.0001) {
                         float ratio = inv_mass / total_inv_mass;
-                        // Gentle, gradual separation for smooth squishing (0.8 = soft)
-                        float push_strength = 0.8;
+                        // Moderate push for visible squishing and deformation
+                        float push_strength = 0.5;
                         total_push += normal * overlap * ratio * push_strength;
 
-                        // Strong velocity damping for smooth membrane collision
+                        // Moderate velocity damping for bouncy collisions
                         vec3 relative_vel = p.vel.xyz - particles[j].vel.xyz;
                         float vel_along_normal = dot(relative_vel, normal);
                         if (vel_along_normal < 0.0) {
-                            // Heavily damp approaching velocities (60% damping)
-                            p.vel.xyz -= normal * vel_along_normal * 0.6;
+                            // Partially damp approaching velocities for bounce
+                            p.vel.xyz -= normal * vel_along_normal * 0.4;
                         }
 
                         collision_count++;

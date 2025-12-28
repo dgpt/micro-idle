@@ -29,6 +29,7 @@ uniform int u_particle_count;
 uniform int u_particles_per_microbe;
 uniform float u_time;
 uniform vec2 u_cursor;
+uniform vec2 u_bounds;  // World space bounds (half-width, half-height)
 
 float hash(float n) {
     return fract(sin(n) * 43758.5453123);
@@ -52,21 +53,26 @@ void main() {
     vec3 center = m.center.xyz;
     float base_radius = m.center.w;
 
-    // === EXCITABLE CORTEX MODEL - Clean Implementation ===
+    // === EXCITABLE CORTEX & MEMORY (EC&M) MODEL ===
     // Pseudopod forms as discrete excitable burst with ~10s lifetime
-    // Global inhibition: only ONE pseudopod active at a time
+    // Global inhibition: only one pseudopod active at a time
+    // Local memory creates zig-zag alternating pattern
 
-    // Wander direction (identical for all microbes)
-    float wander_phase = u_time * 0.3;
-    float wander_angle = sin(wander_phase) * 1.2 + cos(wander_phase * 0.6) * 0.7;
-    vec2 desired_dir = normalize(vec2(cos(wander_angle), sin(wander_angle)));
+    // EC&M: Pseudopod extends, searches, then retracts (like fingers exploring)
+    float pseudopod_lifetime = 12.0;
+    float cycle_time = mod(u_time + seed * 4.0, pseudopod_lifetime);
+    float phase = cycle_time / pseudopod_lifetime;
 
-    // Pseudopod burst timing (10 second lifetime)
-    float pseudopod_lifetime = 10.0;
-    float burst_phase = mod(u_time, pseudopod_lifetime) / pseudopod_lifetime;
+    // Phases: extend (0-0.35), search/hold (0.35-0.75), retract (0.75-1.0)
+    float extend = smoothstep(0.0, 0.35, phase);
+    float retract = smoothstep(0.75, 1.0, phase);
+    float burst_envelope = extend * (1.0 - retract);
 
-    // Active pseudopod angle rotates smoothly with desired direction
-    float active_angle = wander_angle + sin(burst_phase * 6.28318) * 0.2;
+    // Searching behavior: pseudopod sweeps while extended (like feeling around)
+    float base_angle = seed * 6.28318;  // Each cell has unique base direction
+    float zig_zag = sin(cycle_time * 0.4) * 2.6;  // Slow wide sweep (zig-zag)
+    float search = sin(cycle_time * 4.0) * 0.5 * burst_envelope;  // Fast searching wiggle when active
+    float active_angle = base_angle + zig_zag + search;
 
     // Calculate this particle's position relative to center
     vec3 to_particle = p.pos.xyz - center;
@@ -76,45 +82,41 @@ void main() {
     float angle_diff = abs(particle_angle - active_angle);
     if (angle_diff > 3.14159) angle_diff = 6.28318 - angle_diff;
 
-    // Narrow cone for distinct pseudopod (~40 degrees)
-    float cone_width = 0.7;
+    // Very narrow cone for thin finger-like pseudopod (not fat bulge)
+    float cone_width = 0.25;  // ~14 degrees - thin pseudopod
     float excitation = smoothstep(cone_width, 0.0, angle_diff);
-    excitation = excitation * excitation;  // Sharper falloff
 
-    // === VELOCITY-BASED SMOOTH MOTION ===
-    // Apply forces via velocity, let constraints handle shape
+    // STRONG tip focus: only outermost particles extend (thin finger, not fat blob)
+    float dist_from_center = length(to_particle.xz);
+    float tip_factor = smoothstep(0.7, 1.0, dist_from_center);  // Only outer ring extends
+    excitation = excitation * tip_factor * burst_envelope;
 
-    // Base locomotion velocity for all particles (realistic amoeba speed)
-    vec3 locomotion_vel = vec3(desired_dir.x, 0.0, desired_dir.y) * 0.6;
+    // === AMOEBA CRAWLING: Long pseudopod pulls cell forward ===
 
-    // Pseudopod particles get additional outward velocity
+    vec2 pseudopod_dir = vec2(cos(active_angle), sin(active_angle));
+
+    // Controlled pseudopod extension - thin finger not fat bulge
     vec3 pseudopod_vel = vec3(0.0);
     if (excitation > 0.01) {
         vec3 radial_dir = normalize(to_particle);
-        pseudopod_vel = radial_dir * excitation * 1.0;
-        pseudopod_vel += vec3(desired_dir.x, 0.0, desired_dir.y) * excitation * 0.4;
+        // Controlled outward force on tip particles
+        pseudopod_vel = radial_dir * excitation * 3.0;
+        // Directional pull creates elongated shape
+        pseudopod_vel += vec3(pseudopod_dir.x, 0.0, pseudopod_dir.y) * excitation * 1.5;
     }
 
-    // Apply velocities smoothly (damped)
-    float damping = 0.95;
+    // Cell body follows pseudopod slowly
+    vec3 locomotion_vel = vec3(pseudopod_dir.x, 0.0, pseudopod_dir.y) * burst_envelope * 0.2;
+
+    // Apply velocities with smooth damping
+    float damping = 0.94;
     p.vel.xyz = p.vel.xyz * damping + (locomotion_vel + pseudopod_vel) * (1.0 - damping);
 
     // Integrate velocity to position (Verlet integration)
     p.pos.xyz = p.pos.xyz + p.vel.xyz * u_dt;
 
-    // Velocity limit
-    float max_vel = 4.0;
-    float speed = length(p.vel.xyz);
-    if (speed > max_vel) {
-        p.vel.xyz *= max_vel / speed;
-    }
-
-    // Safety bounds to prevent runaway particles
-    float max_distance = 1.5;
-    float current_distance = length(p.pos.xyz - center);
-    if (current_distance > max_distance) {
-        p.pos.xyz = center + normalize(p.pos.xyz - center) * max_distance;
-    }
+    // Let constraints handle shape - no artificial position clamping
+    // XPBD distance constraints will naturally limit particle extension
 
     particles[idx] = p;
 }
