@@ -1,10 +1,10 @@
 #version 430 core
 
-// XPBD Step 2: Solve constraints
-// Iteratively project distance constraints using XPBD formulation.
-// Key formula: Δλ = -(C + α̃λ) / (w1|∇C|² + w2|∇C|² + α̃)
+// XPBD Step 2: Solve constraints (per-microbe sequential)
+// Pure functional approach: each thread handles ONE microbe's constraints sequentially
+// This eliminates race conditions while maintaining reasonable performance
 
-layout(local_size_x = 256) in;
+layout(local_size_x = 64) in;
 
 struct Particle {
     vec4 pos;       // xyz position, w = inverse mass
@@ -26,13 +26,19 @@ layout(std430, binding = 0) buffer Particles { Particle particles[]; };
 layout(std430, binding = 1) buffer Constraints { Constraint constraints[]; };
 
 uniform float u_dt;
-uniform int u_constraint_count;
+uniform int u_microbe_count;
+uniform int u_constraints_per_microbe;
 
 void main() {
-    uint idx = gl_GlobalInvocationID.x;
-    if (idx >= uint(u_constraint_count)) return;
+    uint microbe_id = gl_GlobalInvocationID.x;
+    if (microbe_id >= uint(u_microbe_count)) return;
 
-    Constraint c = constraints[idx];
+    // Process ALL constraints for this microbe sequentially
+    int constraint_start = int(microbe_id) * u_constraints_per_microbe;
+
+    for (int i = 0; i < u_constraints_per_microbe; i++) {
+        int idx = constraint_start + i;
+        Constraint c = constraints[idx];
 
     // Get particle positions and inverse masses
     vec3 x1 = particles[c.p1].pos.xyz;
@@ -76,11 +82,13 @@ void main() {
     // Δx2 = -w2 * Δλ * ∇C
     vec3 correction = delta_lambda * gradC;
 
-    // Atomic-style updates (may need barriers in practice)
-    if (w1 > 0.0001) {
-        particles[c.p1].pos.xyz += w1 * correction;
-    }
-    if (w2 > 0.0001) {
-        particles[c.p2].pos.xyz -= w2 * correction;
-    }
+        // Apply position corrections (safe within single microbe)
+        // Pure Gauss-Seidel: sequential updates within microbe, parallel across microbes
+        if (w1 > 0.0001) {
+            particles[c.p1].pos.xyz += w1 * correction;
+        }
+        if (w2 > 0.0001) {
+            particles[c.p2].pos.xyz -= w2 * correction;
+        }
+    }  // end constraint loop
 }

@@ -42,7 +42,9 @@ void main() {
     // Sample metaball field
     vec4 field_sample = texture(u_field_texture, vTexCoord);
     float field_value = field_sample.r;
-    float microbe_id_norm = field_sample.b;
+
+    // Recover microbe ID from weighted sum (weighted by field contribution)
+    float microbe_id_norm = (field_value > 0.001) ? (field_sample.g / field_value) : 0.0;
 
     // Apply threshold with smooth antialiasing transition
     float threshold_margin = 0.02;  // Smooth edge width
@@ -60,8 +62,8 @@ void main() {
     float dist_from_surface = (field_value - u_threshold) / max(field_value, 0.001);
     dist_from_surface = clamp(dist_from_surface, 0.0, 1.0);
 
-    // Get microbe color based on ID
-    int m_id = int(microbe_id_norm * 1000.0 + 0.5);
+    // Get microbe color based on ID (stored directly as float, not normalized)
+    int m_id = int(microbe_id_norm + 0.5);
     if (m_id < 0 || m_id >= microbes.length()) m_id = 0;
 
     Microbe m = microbes[m_id];

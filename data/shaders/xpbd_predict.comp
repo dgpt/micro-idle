@@ -84,15 +84,15 @@ void main() {
     // === VELOCITY-BASED SMOOTH MOTION ===
     // Apply forces via velocity, let constraints handle shape
 
-    // Base locomotion velocity for all particles
-    vec3 locomotion_vel = vec3(desired_dir.x, 0.0, desired_dir.y) * 0.8;
+    // Base locomotion velocity for all particles (realistic amoeba speed)
+    vec3 locomotion_vel = vec3(desired_dir.x, 0.0, desired_dir.y) * 0.6;
 
     // Pseudopod particles get additional outward velocity
     vec3 pseudopod_vel = vec3(0.0);
     if (excitation > 0.01) {
         vec3 radial_dir = normalize(to_particle);
-        pseudopod_vel = radial_dir * excitation * 1.5;
-        pseudopod_vel += vec3(desired_dir.x, 0.0, desired_dir.y) * excitation * 0.5;
+        pseudopod_vel = radial_dir * excitation * 1.0;
+        pseudopod_vel += vec3(desired_dir.x, 0.0, desired_dir.y) * excitation * 0.4;
     }
 
     // Apply velocities smoothly (damped)
@@ -109,10 +109,8 @@ void main() {
         p.vel.xyz *= max_vel / speed;
     }
 
-    // Safety bounds - consistent size with allowance for pseudopods
-    // Since base_radius is now TINY (skeleton), use larger multiplier
-    // But limit to keep overall size consistent
-    float max_distance = 1.5;  // Fixed absolute distance for consistent size
+    // Safety bounds to prevent runaway particles
+    float max_distance = 1.5;
     float current_distance = length(p.pos.xyz - center);
     if (current_distance > max_distance) {
         p.pos.xyz = center + normalize(p.pos.xyz - center) * max_distance;

@@ -21,7 +21,11 @@ void main() {
     field = max(0.0, field);
 
     // Field strength tuned for filled disc with 4 rings
-    field *= 4.0;
+    field *= 6.0;
 
-    outField = vec4(field, 0.0, vMicrobeID / 1000.0, 1.0);
+    // Weight microbe ID by field strength for proper accumulation
+    // When we divide by total field in surface shader, we get correct average ID
+    float weighted_id = field * vMicrobeID;
+
+    outField = vec4(field, weighted_id, 0.0, 1.0);
 }

@@ -25,7 +25,6 @@ layout(std430, binding = 1) readonly buffer Microbes { Microbe microbes[]; };
 
 uniform mat4 u_vp;
 uniform int u_particles_per_microbe;
-uniform float u_particle_radius;  // Influence radius for each particle
 
 out vec2 vBillboardUV;
 out float vMicrobeID;
@@ -44,8 +43,8 @@ void main() {
     Microbe m = microbes[m_id];
     float base_radius = m.center.w;
 
-    // Billboard size scaled to particle spacing for smooth blending
-    float billboardSize = 0.5;  // Radius for good overlap between particles
+    // Billboard size scaled to ensure full coverage
+    float billboardSize = 0.7;  // Larger radius for better overlap and center fill
 
     // Create billboard in world space (aligned to XZ plane for top-down view)
     // Y=0 plane, billboards expand in X and Z

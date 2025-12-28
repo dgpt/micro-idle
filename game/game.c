@@ -55,7 +55,7 @@ static float parse_env_float(const char *name, float fallback) {
 static GameConfig game_load_config(void) {
     GameConfig config = {0};
     config.max_count = parse_env_int("MICRO_IDLE_ENTITY_COUNT", 500);
-    config.spawn_initial = parse_env_int("MICRO_IDLE_INITIAL_ENTITIES", 2);
+    config.spawn_initial = parse_env_int("MICRO_IDLE_INITIAL_ENTITIES", 20);
     if (config.spawn_initial > config.max_count) {
         config.spawn_initial = config.max_count;
     }
@@ -114,12 +114,12 @@ bool game_init(GameState *game, uint64_t seed) {
         return false;
     }
 
-    // Spawn initial microbes at fixed positions (far apart to avoid interaction)
+    // Spawn initial microbes
     for (int i = 0; i < game->config.spawn_initial; i++) {
-        float x = (i == 0) ? -5.0f : 5.0f;  // Fixed positions far apart
+        float x = (i == 0) ? -5.0f : 5.0f;
         float z = 0.0f;
         int type = 0;
-        float s = 0.5f;  // Same seed for identical behavior
+        float s = (float)i * 0.1f;  // Different seed per microbe
         xpbd_spawn_microbe(game->xpbd, x, z, type, s);
     }
 
@@ -154,12 +154,6 @@ void game_handle_input(GameState *game, Camera3D camera, float dt, int screen_w,
     float t = -ray.position.y / ray.direction.y;
     game->cursor_world_x = ray.position.x + ray.direction.x * t;
     game->cursor_world_z = ray.position.z + ray.direction.z * t;
-
-    // DEBUG: Print cursor world position every 60 frames
-    static int frame_count = 0;
-    if (++frame_count % 60 == 0) {
-        printf("DEBUG: cursor world pos: (%.2f, %.2f)\n", game->cursor_world_x, game->cursor_world_z);
-    }
 }
 
 void game_update_fixed(GameState *game, float dt) {
