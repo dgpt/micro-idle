@@ -82,31 +82,17 @@ Motion communicates state and threat level rather than serving as pure spectacle
 
 ### **Physics: Soft-Body Simulation**
 
-Microbes are physically simulated as **deformable soft bodies** using **Bullet Physics** with OpenCL GPU acceleration:
-
-* **Particle-based soft bodies**: Each microbe consists of nodes (particles) connected by distance constraints
-  - Amoeba: 16 skeleton (internal structure) + 16 membrane (elastic outer layer) = 32 nodes
-  - Other types have specialized configurations (Stentor: trumpet shape, Lacrymaria: extendable neck chain)
-* **Skeleton structure**: Internal nodes arranged to drive shape and maintain integrity
-* **Membrane layer**: Elastic outer nodes that deform, compress, and recover naturally
-* **Distance constraints**: Links between nodes create soft-body behavior with configurable stiffness
-* **Inter-microbe collisions**: Cause visible squishing and deformation when surfaces overlap
-* **Collision response**: Soft and bouncy - microbes compress like gel, then separate smoothly
-* **Material properties**: Different microbe types have different stiffness/squishiness (amoebas soft, diatoms rigid)
-* **GPU acceleration**: Bullet's OpenCL solver runs physics on GPU for performance at scale
+Microbes are physically simulated as **deformable soft bodies**:
+- Soft, squishy, gel-like collision behavior
+- Visible squishing and elastic deformation
+- Inter-microbe collisions feel tactile and organic
 
 **Amoeba Locomotion (EC&M Model)**:
-Amoebas use the **Excitable Cortex & Memory (EC&M)** algorithm for realistic pseudopod-based movement:
-- 12-second behavioral cycle with phases: extend (0-35%), search (35-75%), retract (75-100%)
-- One thin pseudopod extends at a time (not fat bulging)
-- Lateral wiggle during search phase creates characteristic zig-zag motion
-- Forces applied to membrane nodes drive Bullet soft body naturally
-
-**Collision Behavior Requirements**:
-- Microbes MUST collide when visual surfaces touch (collision radius matches rendered size)
-- Response MUST show visible squishing and elastic deformation
-- After collision, microbes MUST bounce apart gently, not stick or penetrate
-- Collisions feel like soft gel bodies bumping into each other
+Amoebas use the **Excitable Cortex & Memory (EC&M)** algorithm for realistic movement:
+- 12-second behavioral cycle: extend → search → retract
+- One thin pseudopod extends at a time
+- Lateral wiggle creates characteristic zig-zag motion
+- Biologically grounded force application
 
 This creates microbes that feel **alive and tactile** rather than rigid sprites.
 
@@ -274,35 +260,10 @@ The primary goal of all programming work is **complexity reduction while achievi
 
 ---
 
-## **Technical Implementation**
+---
 
-### **Language & Stack**
-* **Language**: C++17 for clean modern code
-* **Framework**: raylib 5.5 (window/input/rendering)
-* **Physics**: Bullet Physics 3.25 with OpenCL GPU solver
-* **Graphics**: OpenGL 4.6 (via Mesa Zink on Linux)
-* **Build**: CMake with FetchContent for dependencies
+## **Technical Details**
 
-### **Rendering System**
-Microbes are rendered using **deformable metaballs** for organic appearance:
-* **Skeleton particles** generate metaball field (additive influence)
-* **Membrane particles** modulate boundary and create smooth surface
-* **Fragment shader** adds cellular details:
-  - Semi-transparent membrane with thickness gradient
-  - Internal organelles (skeleton particles visible through membrane)
-  - Pseudopod tips highlighted (brighter/more transparent)
-  - Nucleus region at center with distinct coloring
-* **Metaball blending** creates smooth flowing boundaries that deform naturally
-* **GPU instancing** renders thousands of particles efficiently
-
-**Type-specific rendering**:
-- Soft types (amoeba, stentor): Full metaball blending
-- Spiked types (heliozoa, radiolarian): Thin line extensions for spines
-- Rigid types (diatom): Geometric shell rendering
-- Cilia types: Motion blur or flow lines
-
-This approach naturally shows:
-- Internal structure through semi-transparent membrane
-- Thin pseudopod extensions (field strength varies with deformation)
-- Organic blob-like shapes that compress and recover
-- Diverse microbe morphologies with single unified system
+For implementation architecture, build system, and technical specifications, see:
+- **[ARCHITECTURE.MD](ARCHITECTURE.MD)** - Code structure, ECS/physics integration, rendering pipeline
+- **[PLAN.md](PLAN.md)** - Implementation roadmap and current progress

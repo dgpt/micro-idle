@@ -1,369 +1,232 @@
-# Bullet Physics Integration - Implementation Progress
+# Micro-Idle Engine - Implementation Plan
 
-## Quick Status
-- **Current Phase**: Phase 3 - Metaball Rendering
-- **Last Updated**: Physics stability fixes complete - microbes visible and stable!
-- **Next Up**: Implement metaball rendering for organic amoeba appearance
-
----
-
-## Phase 1: Foundation (C++ Conversion + Bullet Setup)
-
-### ✅ Phase 1.1: Update Documentation - COMPLETED
-- [x] Update README.md - physics section, microbe types ✅
-- [x] Update ARCHITECTURE.MD - C++17, Bullet, metaballs ✅
-- [x] Create this PLAN.md file ✅
-
-### ✅ Phase 1.2: Configure Build System - COMPLETED
-- [x] Edit CMakeLists.txt - add C++, Bullet, OpenCL ✅
-  - Added C++ language support (C++17)
-  - Integrated Bullet Physics via FetchContent (tag 3.25)
-  - Added OpenCL detection (optional GPU acceleration)
-  - Linked all Bullet libraries (BulletSoftBody, BulletDynamics, BulletCollision, LinearMath)
-  - Disabled Bullet extras/demos for faster builds
-- [x] Test build system changes ✅
-  - Build initiated successfully
-  - Bullet Physics downloading and compiling
-  - OpenCL headers found (v3.0)
-  - Note: OpenCL library not found (will fall back to CPU solver if needed)
-
-### ✅ Phase 1.3: Rename Source Files - COMPLETED
-- [x] bin/main.c → main.cpp ✅
-- [x] game/game.c → game.cpp ✅
-- [x] game/xpbd.c → xpbd.cpp ✅
-- [x] engine files .c → .cpp ✅
-  - engine/platform/engine.cpp
-  - engine/platform/time.cpp
-  - engine/util/rng.cpp
-- [x] tests/*.c → tests/*.cpp ✅
-- [x] Update CMakeLists.txt source lists ✅
-
-### ✅ Phase 1.4: Minimal C++ Conversion - COMPLETED
-- [x] Fix C/C++ incompatibilities ✅
-  - Added explicit casts for malloc/calloc (5 locations in xpbd.cpp)
-  - C++ requires `(Type*)` cast from `void*`
-- [x] Verify build succeeds ✅
-  - game.exe: 2.1M (compiled successfully)
-  - tests.exe: 2.1M (compiled successfully)
-  - Bullet Physics libraries linked correctly
-  - All source files compiling as C++
-
-**Phase 1 Completion Goal**: Project builds in C++ with Bullet linked (physics stubbed)
+## Current Status
+- **Phase**: 4 - Basic Microbe System Working
+- **Last Updated**: 2025-12-28
+- **Status**: Physics, locomotion, and basic rendering working
+- **Known Issues**:
+  - Mesh looks low-poly (only 12 vertices, flat shading)
+  - Constraint creation hangs with >12 vertices (needs optimization)
+- **Completed**:
+  - ✅ Fixed crash (ECMLocomotionSystem division by zero)
+  - ✅ Mesh physics (cloth sim over skeleton) working
+  - ✅ EC&M locomotion working
+  - ✅ Mesh surface rendering (triangle drawing)
+  - ✅ No gravity / Y-axis locked for 2D simulation
 
 ---
 
-## Phase 2: Bullet Physics Core Integration
+## Architecture Overview
 
-### Test Strategy
-**Existing tests (must keep passing):**
-- test_time - timing system (no changes needed)
-- test_rng - random generation (no changes needed)
-- test_engine - engine init (no changes needed)
-- test_game_constants - constants (no changes needed)
+**Tech Stack**:
+- **Language**: C++20
+- **Build**: CMake with FetchContent/Git submodules
+- **Framework**: Raylib 5.5 (windowing, input, rendering)
+- **Physics**: Jolt Physics (multi-threaded CPU)
+- **ECS**: FLECS (Entity Component System)
 
-**New physics tests (TDD approach):**
-- test_physics_bullet - Will FAIL until Bullet implementation complete
-  - Test soft body creation
-  - Test node/link setup
-  - Test force application
-  - Test simulation step
+**The Simulation Loop**:
+1. **Input Phase**: Raylib polls input → writes to FLECS `InputComponent`
+2. **Simulation Phase**:
+   - `System_UpdatePhysics`: Steps Jolt world
+   - `System_SyncTransforms`: Jolt → FLECS transform sync
+   - `System_GameLogic`: FLECS queries for game state updates
+3. **Render Phase**: FLECS queries → Raylib `DrawMesh()`
 
-**Visual test update:**
-- test_visual - Currently uses XPBD, will update for Bullet after Phase 2 complete
-
-### ✅ Phase 2.1: New Physics Interface - COMPLETED
-- [x] Create game/physics.h (C++ class) ✅
-- [x] Define PhysicsContext class ✅
-- [x] Create test_physics_bullet.cpp (will fail initially) ✅
-- [x] Create game/physics.cpp stub implementation ✅
-- [x] Add to build system and test runner ✅
-- [x] Build succeeds ✅
-- [x] Run tests to verify TDD ✅
-  - Added static linking flags (-static-libgcc -static-libstdc++ -static)
-  - Executables now 5.9M (statically linked, no DLL dependencies)
-  - Tests run successfully from WSL
-  - Physics test initializes own OpenGL context for SSBO creation
-
-### ✅ Phase 2.2: Bullet World Setup - COMPLETED
-- [x] Implement PhysicsContext::init() ✅
-- [x] Allocate CPU staging buffers (ParticleData, MicrobeData) ✅
-- [x] Create OpenGL SSBOs for rendering compatibility ✅
-- [x] Initialize Bullet collision configuration ✅
-- [x] Setup btSoftRigidDynamicsWorld with btDefaultSoftBodySolver ✅
-- [x] Configure world (zero gravity for floating microbes) ✅
-- [x] Setup btSoftBodyWorldInfo ✅
-- [x] Implement PhysicsContext destructor (full cleanup) ✅
-- [x] Build succeeds ✅
-- [x] Tests passing ✅
-  - test_physics_bullet: Context creation, SSBO allocation ✅
-  - Remaining tests will pass after Phase 2.4-2.7 implementation
-
-### ✅ Phase 2.3: Microbe Body Plans - COMPLETED
-- [x] Create game/microbe_bodies.h ✅
-- [x] Create game/microbe_bodies.cpp ✅
-- [x] Define getAmoebaPlan() ✅
-  - 16 skeleton particles (3 concentric rings)
-  - 16 membrane particles (outer circle)
-  - 66 distance constraints with varying stiffness
-  - Stub implementations for 7 other microbe types
-
-### ✅ Phase 2.4: Amoeba Soft Body - COMPLETED
-- [x] Implement PhysicsContext::spawnMicrobe() ✅
-- [x] Create Bullet soft bodies using btSoftBodyHelpers::CreateEllipsoid() ✅
-- [x] Configure soft body material properties ✅
-- [x] Test soft body creation ✅
-  - test_physics_bullet: All tests passing ✅
-  - Amoeba spawns with 513 nodes, 1533 links
-  - Note: Using ellipsoid helper instead of manual node construction (appendNode had initialization issues)
-
-### ✅ Phase 2.5: EC&M Locomotion - COMPLETED
-- [x] Implement MicrobeBody::applyECMForces() ✅
-  - 12-second behavioral cycle (extend 0-35%, search 35-75%, retract 75-100%)
-  - Pseudopod extension: outward force on target node
-  - Search phase: lateral wiggle (sinusoidal perpendicular motion)
-  - Retraction phase: pull pseudopod back + push body forward
-  - Smoothstep transitions between phases
-- [x] Test pseudopod forces ✅
-
-### ✅ Phase 2.6: Physics Update Loop - COMPLETED
-- [x] Implement PhysicsContext::update() ✅
-  - Apply EC&M forces to all amoebas
-  - Step Bullet simulation (world->stepSimulation)
-  - Sync to SSBOs
-- [x] Implement syncToSSBOs() ✅
-  - Copy Bullet node positions to ParticleData buffer
-  - Copy microbe metadata to MicrobeData buffer (center, color, params, AABB)
-  - Upload to GPU SSBOs via glBufferSubData
-- [x] Test physics simulation ✅
-  - All tests passing (spawn, update, SSBO sync all working)
-
-### ✅ Phase 2.7: Game Integration - COMPLETED
-- [x] Update game.cpp to use PhysicsContext ✅
-  - Replaced XpbdContext with PhysicsContext throughout
-  - Changed xpbd_create → PhysicsContext::create
-  - Changed xpbd_spawn_microbe → spawnMicrobe with MicrobeType::AMOEBA
-  - Changed xpbd_update → physics->update
-  - Changed xpbd_render → physics->render
-  - Updated UI to use getMicrobeCount()
-- [x] Implement temporary rendering (simple spheres) ✅
-- [x] Test end-to-end ✅
-  - Game launches successfully
-  - Amoebas spawn with Bullet soft bodies
-  - Physics updates every frame with EC&M locomotion
-  - Renders as green spheres (temporary until Phase 3)
-  - All tests passing
-
-**🎉 PHASE 2 COMPLETE!** Full Bullet physics integration with EC&M locomotion working in game!
+**Platforms**: Windows, Linux, macOS, Android, iOS
 
 ---
 
-## Phase 3: Metaball Rendering System
+## Phase 1: Foundation Setup
 
-### Phase 3.1: Metaball Shaders
-- [ ] Create data/shaders/metaball_soft.vert
-- [ ] Create data/shaders/metaball_soft.frag
-- [ ] Compile and test shaders
+### 1.1 Documentation
+- [ ] Update README.md (FLECS, Jolt, C++20)
+- [ ] Update ARCHITECTURE.MD (Simulation Loop pattern)
+- [ ] Clean up old Bullet-related docs
 
-### Phase 3.2: Metaball Renderer
-- [ ] Create game/renderer.cpp
-- [ ] Implement MicrobeRenderer class
-- [ ] Test rendering
+### 1.2 CMake Configuration
+- [ ] Set C++20 standard
+- [ ] Add FLECS via FetchContent (https://github.com/SanderMertens/flecs)
+- [ ] Add Jolt Physics via FetchContent (https://github.com/jrouwe/JoltPhysics)
+- [ ] Keep Raylib 5.5 configuration
+- [ ] Set optimization flags (-O3 for GCC/Clang, /O2 for MSVC)
+- [ ] Configure static linking
+- [ ] Remove Bullet dependencies
 
-### Phase 3.3: Game Integration
-- [ ] Add renderer to game.cpp
-- [ ] Test full rendering pipeline
+### 1.3 Directory Restructure
+- [ ] Create `/extern` for submodules (if using git submodules)
+- [ ] Create `/src/components` for FLECS components
+- [ ] Create `/src/systems` for FLECS systems
+- [ ] Remove old physics code (`game/physics.cpp`, `game/physics.h`, `game/xpbd.cpp`)
+- [ ] Remove old microbe bodies (`game/microbe_bodies.cpp`, `game/microbe_bodies.h`)
+- [ ] Clean up unused test files
 
-**Phase 3 Completion Goal**: Amoebas render as organic metaballs
-
----
-
-## Phase 4: Additional Microbe Types
-
-### Phase 4.1: Body Plan Implementations
-- [ ] Stentor (trumpet + contractile stalk)
-- [ ] Lacrymaria (extendable neck)
-- [ ] Vorticella (bell + stalk)
-- [ ] Didinium (barrel + proboscis)
-- [ ] Heliozoa (radiating spikes)
-- [ ] Radiolarian (geometric skeleton)
-- [ ] Diatom (rigid frustule)
-
-### Phase 4.2: Factory Pattern
-- [ ] Implement createMicrobe() factory
-- [ ] Test spawning different types
-
-### Phase 4.3: Type-Specific Rendering
-- [ ] Update shaders for variant types
-- [ ] Test visual variety
-
-**Phase 4 Completion Goal**: All microbe types working
+### 1.4 Build Verification
+- [ ] Build succeeds on current platform
+- [ ] All tests pass
+- [ ] Verify FLECS and Jolt link correctly
 
 ---
 
-## Phase 5: Polish & Optimization
+## Phase 2: FLECS Core Integration
 
-### Phase 5.1: OpenCL Optimization
-- [ ] Profile GPU solver
-- [ ] Tune parameters
+### 2.1 Basic Components
+- [ ] Create `src/components/Transform.h` (Position, Rotation, Scale)
+- [ ] Create `src/components/Physics.h` (RigidBodyConfig, BodyID)
+- [ ] Create `src/components/Rendering.h` (MeshComponent, ColorComponent)
+- [ ] Create `src/components/Input.h` (InputComponent for cursor position)
 
-### Phase 5.2: Visual Enhancements
-- [ ] Improve metaball blending
-- [ ] Add membrane distortion
-- [ ] Pseudopod glow effects
+### 2.2 World Setup
+- [ ] Create `FlecsWorld` class wrapper
+- [ ] Initialize FLECS world in `main.cpp`
+- [ ] Set up FLECS pipeline phases (OnUpdate, OnStore, PostUpdate)
+- [ ] Basic entity creation/destruction
 
-### Phase 5.3: Collision Tuning
-- [ ] Test inter-microbe collisions
-- [ ] Adjust Bullet contact parameters
+### 2.3 Basic Systems
+- [ ] `System_UpdateInput`: Raylib → FLECS
+- [ ] `System_Render`: FLECS → Raylib (basic sphere rendering initially)
+- [ ] Verify entity spawning and rendering works
 
-### Phase 5.4: Testing
-- [ ] Test 500+ microbes
+---
+
+## Phase 3: Jolt Physics Bridge
+
+### 3.1 Jolt Initialization
+- [ ] Create `src/systems/PhysicsSystem.h/cpp`
+- [ ] Initialize Jolt `JPH::PhysicsSystem`
+- [ ] Configure job system (multi-threading)
+- [ ] Set up broad phase, object layers, contact listeners
+- [ ] Store as FLECS singleton component
+
+### 3.2 The Bridge (FLECS ↔ Jolt)
+- [ ] Create FLECS Observer for `RigidBodyConfig` component
+  - When added → create Jolt body, store `BodyID` on entity
+- [ ] Create FLECS Observer for component removal
+  - When removed → destroy Jolt body
+- [ ] Implement `System_SyncTransforms`:
+  - Read Jolt positions → write to FLECS `Transform`
+
+### 3.3 Physics Update Loop
+- [ ] `System_UpdatePhysics`: Step Jolt world each frame
+- [ ] Handle FLECS → Jolt teleportation (gameplay overrides)
+- [ ] Test with simple falling boxes or spheres
+
+---
+
+## Phase 4: Microbe Entity Migration
+
+### 4.1 Microbe Components
+- [ ] Create `src/components/Microbe.h`:
+  - `MicrobeType` enum
+  - `ECMLocomotion` component (phase, pseudopod state)
+  - `MicrobeStats` (seed, color, size)
+
+### 4.2 Soft Body Physics (Jolt)
+- [ ] Research Jolt soft body support (or use multiple rigid bodies connected by constraints)
+- [ ] Create amoeba as cluster of connected spheres (lattice structure)
+- [ ] Configure Jolt distance constraints for deformability
+- [ ] Test single amoeba deformation
+
+### 4.3 EC&M Locomotion System
+- [ ] Port EC&M algorithm to FLECS system
+- [ ] `System_AmoebaBehavior`: Query entities with `ECMLocomotion`
+- [ ] Apply forces to Jolt bodies based on cycle phase
+- [ ] Verify amoeba movement works
+
+---
+
+## Phase 5: Rendering (Metaballs)
+
+### 5.1 Particle Data Sync
+- [ ] Create SSBO for particle positions (from Jolt soft body nodes)
+- [ ] `System_SyncParticles`: Jolt → GPU SSBO
+- [ ] Verify data reaches shader
+
+### 5.2 Metaball Shaders
+- [ ] Create `data/shaders/metaball.vert`
+- [ ] Create `data/shaders/metaball.frag`
+- [ ] Implement metaball field rendering (instanced billboards)
+- [ ] Load shaders in rendering system
+
+### 5.3 Microbe Renderer
+- [ ] `System_RenderMicrobes`: Use metaball shaders
+- [ ] Bind particle SSBO
+- [ ] Draw instanced quads (one per particle)
+- [ ] Verify organic blob appearance
+
+---
+
+## Phase 6: Scaling & Optimization
+
+### 6.1 Performance Testing
+- [ ] Spawn 100+ microbes
 - [ ] Profile frame times
-- [ ] Final verification
+- [ ] Profile Jolt simulation time
+- [ ] Identify bottlenecks
 
-**Phase 5 Completion Goal**: 60 FPS with 500 microbes, polished visuals
+### 6.2 Jolt Multi-threading
+- [ ] Configure Jolt job system for max CPU cores
+- [ ] Test performance improvement
+- [ ] Verify determinism (if needed)
 
----
-
-## Microbe Types Reference
-
-### Protists (Primary)
-1. **Amoeba** - Blob, pseudopods, highly deformable
-2. **Stentor** - Trumpet ciliate, contractile body
-3. **Lacrymaria** - Long extendable neck (7× body)
-4. **Vorticella** - Bell with contractile stalk
-5. **Didinium** - Barrel predator with proboscis
-6. **Heliozoa** - Sphere with radiating axopodia
-7. **Radiolarian** - Geometric silica skeleton
-8. **Diatom** - Rigid silica frustule
-
-### Bacteria
-- Bacillus (rod), Coccus (sphere), Vibrio (curved), Spirillum (spiral)
-
-### Viruses
-- Icosahedral capsids, Bacteriophages
+### 6.3 FLECS Optimization
+- [ ] Use FLECS queries efficiently (cache queries)
+- [ ] Add/remove entities in batches
+- [ ] Profile FLECS system overhead
 
 ---
 
-## Notes & Decisions
+## Phase 7: Additional Microbe Types
 
-### Rendering Decision
-Using **deformable metaballs** with internal structure:
-- Skeleton particles generate metaball field
-- Membrane particles modulate boundary
-- Fragment shader adds cellular details
-- Semi-transparent membrane shows organelles
+### 7.1 New Body Plans
+- [ ] Stentor (trumpet shape)
+- [ ] Lacrymaria (extendable neck)
+- [ ] Heliozoa (radiating spines)
+- [ ] Bacteria (simple spheres/rods)
 
-### Key Technical Choices
-- C++17 (modern, clean)
-- Bullet OpenCL GPU solver
-- EC&M hybrid approach (Bullet motors + custom forces)
-- SSBO-based rendering (maintain compatibility)
+### 7.2 Type-Specific Systems
+- [ ] `System_StentorBehavior`
+- [ ] `System_LacrymariaBehavior`
+- [ ] Rendering variants (shader switches)
 
-### Critical Files
+---
+
+## Phase 8: Cross-Platform
+
+### 8.1 Platform Abstractions
+- [ ] `GetResourcePath()` wrapper (Desktop vs Android vs iOS)
+- [ ] Main loop abstraction (while loop vs OS callback)
+- [ ] Test on Linux
+
+### 8.2 Mobile Preparation
+- [ ] Android NDK build configuration
+- [ ] iOS Xcode project generation
+- [ ] Test build (if devices available)
+
+---
+
+## Key Files
+
 **Docs**: README.md, ARCHITECTURE.MD, PLAN.md (this file)
 **Build**: CMakeLists.txt, bin/build.sh
-**Physics**: game/physics.{h,cpp}, game/microbe_bodies.cpp
-**Rendering**: game/renderer.cpp, data/shaders/metaball_soft.*
-**Game**: game/game.cpp, bin/main.cpp
+**Components**: src/components/*.h
+**Systems**: src/systems/*.cpp
+**Shaders**: data/shaders/metaball.*
+**Main**: bin/main.cpp
 
 ---
 
-## Daily Progress Log
+## Cleanup Checklist
 
-### [Current Session]
-- ✅ Created PLAN.md for progress tracking
-- ✅ Phase 1.1 Complete: Updated README.md with:
-  - Bullet Physics description
-  - All 8+ microbe types (Amoeba, Stentor, Lacrymaria, Vorticella, Didinium, Heliozoa, Radiolarian, Diatom, bacteria, viruses)
-  - EC&M locomotion model
-  - Metaball rendering system
-  - C++17 technical stack
-- ✅ Phase 1.1 Complete: Updated ARCHITECTURE.MD with:
-  - C++17 language change
-  - Bullet Physics OpenCL integration
-  - Microbe body plan system
-  - EC&M hybrid approach
-  - Metaball rendering architecture
-- ✅ Phase 1.2 Complete: Configured CMakeLists.txt:
-  - Added C++ language with C++17 standard
-  - Integrated Bullet Physics 3.25 via FetchContent
-  - Added OpenCL detection (headers found, library optional)
-  - Linked Bullet libraries to both game and tests targets
-  - Build system successfully compiling Bullet
-- ✅ Phase 1.3 Complete: Renamed all source files:
-  - All .c → .cpp (bin, game, engine, tests)
-  - Updated CMakeLists.txt source lists
-  - CMake reconfigured successfully
-- ✅ Phase 1.4 Complete: Fixed C++ compatibility:
-  - Added explicit casts for malloc/calloc
-  - Build succeeded: game.exe & tests.exe compiled (2.1M each)
-  - Bullet Physics fully integrated and linked
+Files to DELETE:
+- [ ] `game/physics.cpp` (old Bullet code)
+- [ ] `game/physics.h` (old Bullet code)
+- [ ] `game/xpbd.cpp` (legacy XPBD solver)
+- [ ] `game/microbe_bodies.cpp` (old body plans)
+- [ ] `game/microbe_bodies.h` (old body plans)
+- [ ] Any Bullet-specific test files
 
-**🎉 PHASE 1 COMPLETE!** Project successfully migrated to C++17 with Bullet Physics integrated.
-
-- ✅ Phase 2.1 Complete: New physics interface created:
-  - game/physics.h - PhysicsContext C++ class
-  - game/physics.cpp - Stub implementation
-  - tests/test_physics_bullet.cpp - TDD test suite
-  - Test infrastructure in place
-- ✅ Phase 2.2 Complete: Bullet world initialized:
-  - btSoftRigidDynamicsWorld with soft body solver
-  - OpenGL SSBOs for particle/microbe data (rendering compatibility)
-  - CPU staging buffers allocated
-  - Proper initialization and cleanup
-  - Build succeeds: game.exe & tests.exe (5.9M each, statically linked)
-- ✅ Phase 2.3 Complete: Microbe body plans defined:
-  - game/microbe_bodies.h/cpp created with body plan system
-  - Full Amoeba implementation: 16 skeleton + 16 membrane nodes, 66 constraints
-  - Helper functions for ring generation and constraint definition
-  - Stub implementations for 7 other microbe types (Stentor, Lacrymaria, etc.)
-- ✅ Phase 2.4 Complete: Bullet soft body creation working:
-  - PhysicsContext::spawnMicrobe() implemented
-  - Using btSoftBodyHelpers::CreateEllipsoid() for amoeba soft bodies
-  - 513 nodes, 1533 links per amoeba (deformable blob)
-  - All tests passing (test_physics_bullet: spawn, update, SSBOs all OK)
-  - Fixed worldInfo initialization (use world->getWorldInfo() reference)
-
-**🎉 PHASE 2.1-2.4 COMPLETE!** Bullet soft body amoebas spawning and simulating successfully.
-
-- ✅ Phase 2.5 Complete: EC&M Locomotion implemented:
-  - MicrobeBody::applyECMForces() with full 12-second cycle
-  - Extension phase: pseudopod pushes outward
-  - Search phase: lateral wiggle for substrate detection
-  - Retraction phase: pulls body forward
-  - Smooth transitions with smoothstep interpolation
-- ✅ Phase 2.6 Complete: Physics update pipeline working:
-  - PhysicsContext::update() applies forces and steps simulation
-  - syncToSSBOs() copies Bullet state to GPU buffers
-  - ParticleData: 513 nodes per amoeba with positions, velocities
-  - MicrobeData: center of mass, color, parameters, AABB
-  - All tests passing (spawn, update, SSBO upload all functional)
-
-**🎉 PHASE 2.1-2.6 COMPLETE!** Full Bullet physics pipeline with EC&M locomotion working!
-
-- ✅ Phase 2.7 Complete: Game integration successful:
-  - game.cpp fully migrated from XPBD to PhysicsContext
-  - All game loop functions updated (init, spawn, update, render, UI)
-  - Simple temporary rendering implemented (green spheres)
-  - Game launches and runs successfully with Bullet physics
-  - 20 amoebas spawning by default, EC&M forces applied every frame
-  - Physics simulation stable at 60 FPS
-  - All tests passing
-
-**🎉🎉 PHASE 2 COMPLETE! 🎉🎉**
-**Full Bullet Physics integration done - soft bodies, EC&M locomotion, game working!**
-
-### Physics Stability Fixes (Post Phase 2.7)
-- ✅ Reduced soft body node count: 512 → 32 (eliminated solver instability)
-- ✅ Tuned material properties:
-  - Damping: 0.05 → 0.1 (more viscous gel-like behavior)
-  - Pressure: 2500 → 100 (stable volume preservation)
-  - Stiffness: 0.5 → 0.3 (more deformable, squishy amoebas)
-- ✅ Reduced EC&M force magnitude: 15.0 → 2.0 (gentler locomotion)
-- ✅ Fixed simulation timestep: use 1/60 fixed internal step
-- ✅ Implemented boundary forces to keep microbes in visible area
-- ✅ Updated visual test: correct camera (y=22), screenshot at frame 60
-- ✅ Added test_microbe_positions for particle count verification
-- ✅ Result: Microbes stable, visible, and deforming naturally!
-
-- **Next**: Phase 3 - Metaball rendering for organic appearance
+Dependencies to REMOVE from CMake:
+- [ ] Bullet Physics FetchContent
+- [ ] All Bullet library links
+- [ ] OpenCL detection (not needed with Jolt)

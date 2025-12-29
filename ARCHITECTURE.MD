@@ -1,12 +1,15 @@
-# Micro-Idle (raylib / C) — Architecture
+# Micro-Idle — Architecture
 
 ## 1) Goals
 
-- Code-first, minimal dependencies, single-binary runtime.
-- GPU-driven simulation + rendering with no CPU fallback.
-- Stable frame pacing and predictable performance at scale.
-- Determinism-friendly time model (fixed step), even if not always enabled.
-- Structure that is safe to edit and extend module-by-module.
+- Code-first, minimal dependencies, single-binary runtime
+- CPU multi-threaded physics (Jolt), GPU rendering (Raylib)
+- **Primary target: Windows .exe** (cross-compiled from WSL for GPU access)
+- Cross-platform support: Linux, macOS, Android, iOS (future)
+- ECS architecture (FLECS) for clean entity/component separation
+- Stable frame pacing and predictable performance at scale
+- Determinism-friendly time model (fixed step)
+- Small, composable, testable modules
 
 ---
 
@@ -107,55 +110,154 @@ Non-compliance with requirements marked "Mandatory" is not permitted. Code revie
 
 ## 3) Stack
 
-- **Language:** C++17
-- **Framework:** raylib 5.5 (window/input/audio/rlgl)
-- **Physics:** Bullet Physics 3.25 with OpenCL GPU solver
-- **Graphics:** OpenGL 4.6 (rendering/shaders) + SSBOs
-  - We run on **zink** (Mesa Vulkan -> OpenGL) for 4.6 core features.
-  - `bin/main.cpp` sets `MESA_LOADER_DRIVER_OVERRIDE=zink` on Linux.
-- **GPU-accelerated:** Physics runs on GPU via Bullet OpenCL, rendering via OpenGL compute/fragment shaders
+- **Language:** C++20
+- **Framework:** Raylib 5.5 (window/input/audio/rendering)
+- **ECS:** FLECS (Entity Component System)
+- **Physics:** Jolt Physics (multi-threaded CPU)
+- **Graphics:** OpenGL 4.6 / Metal / Vulkan (platform-dependent, via Raylib)
+  - Linux: OpenGL 4.6 via Mesa
+  - macOS: Metal via Raylib backend
+  - Windows: OpenGL 4.6 / DirectX via Raylib
+- **Multi-threaded:** Jolt physics uses all CPU cores, FLECS systems run in pipeline phases
 
 ---
 
-## 4) Repository Layout (Contract)
+## 4) File System Structure (Lean & Modular)
+
+### Principles
+- **One concern per file**: Each file has a single, clear responsibility
+- **Small & composable**: Prefer many small files over few large files
+- **Test co-location**: Each `.cpp` file has a corresponding `test_*.cpp`
+- **Pure functions**: Stateless functions in separate files when possible
+
+### Directory Structure
 
 ```
-/engine
-  /platform             # raylib-facing platform wrappers: window, input mapping, timing
-  /render               # renderer abstraction on top of raylib (passes, layers, materials)
-  /assets               # asset manager + pack reader + caching
-  /io                   # vfs, serialization, binary formats, compression
-  /math                 # vec/mat/quats, color utils, hashing helpers
-  /util                 # logging, asserts, allocators, profiling, arenas
-  /debug                # debug draw, dev console, capture tools, inspector UI
-  /ecs                  # (optional) Flecs integration or custom entity store
-/game                   # project-specific code
-/tests                  # unit and integration tests
-/third_party            # raylib, optional libs
+/src                          # NEW - All game code (FLECS/Jolt based)
+  /components                 # FLECS component definitions (header-only)
+    Transform.h               # Position, rotation, scale
+    PhysicsBody.h             # Jolt BodyID, mass, collision shape
+    Microbe.h                 # MicrobeType, seed, stats
+    ECMLocomotion.h           # EC&M state machine data
+    Rendering.h               # Color, mesh reference, visibility
+    Input.h                   # Input state component
+
+  /systems                    # FLECS systems (one system per file)
+    PhysicsSystem.cpp/h       # Jolt initialization, world stepping
+    TransformSyncSystem.cpp/h # Jolt → FLECS transform sync
+    ECMBehaviorSystem.cpp/h   # EC&M algorithm implementation
+    RenderSystem.cpp/h        # FLECS → Raylib rendering
+    InputSystem.cpp/h         # Raylib → FLECS input capture
+
+  /physics                    # Jolt physics utilities (pure functions)
+    BodyFactory.cpp/h         # createSphere(), createSoftBody(), etc.
+    Constraints.cpp/h         # Distance constraints, springs
+    Materials.cpp/h           # Friction, restitution presets
+
+  /rendering                  # Rendering utilities (pure functions)
+    Metaballs.cpp/h           # Metaball field calculations
+    ShaderLoader.cpp/h        # Load and compile shaders
+    ParticleSync.cpp/h        # Sync particles to SSBO
+
+  /math                       # Math utilities (header-only, pure)
+    Vec3.h                    # 3D vector operations
+    Quat.h                    # Quaternion operations
+    Random.h                  # RNG utilities
+
+  World.cpp/h                 # FLECS world wrapper and initialization
+
+/engine                       # Platform abstraction (minimal)
+  /platform
+    engine.cpp/h              # Window, context, main loop
+    time.cpp/h                # Fixed-step accumulator
+  /util
+    rng.cpp/h                 # Random number generation
+    logging.h                 # Logging macros (header-only)
+
+/game                         # Legacy code (being phased out)
+  game.cpp/h                  # Old game loop (will migrate to /src)
+
+/tests                        # Tests mirror /src structure
+  /components                 # Component tests
+    test_Transform.cpp
+    test_PhysicsBody.cpp
+  /systems                    # System tests
+    test_PhysicsSystem.cpp
+    test_ECMBehaviorSystem.cpp
+  /physics                    # Physics utility tests
+    test_BodyFactory.cpp
+  /rendering                  # Rendering utility tests
+    test_Metaballs.cpp
+
+  test_main.cpp               # Test runner
+  test_time.cpp               # Platform tests
+  test_rng.cpp
+  test_engine.cpp
+
 /data
-  /raw                  # source assets (png, wav, fonts, models)
-  /shaders              # shader sources (glsl)
-  /baked                # baked outputs (packed archive, atlases, preprocessed shaders)
-/bin                    # build/run/pack scripts
+  /shaders                    # GLSL shaders
+    metaball.vert
+    metaball.frag
+  /raw                        # Source assets (future)
+
+/bin                          # Build scripts
+  build.sh                    # Configure + build
+  clean.sh                    # Clean cache
+  test.sh                     # Run tests + coverage
+
 CMakeLists.txt
-ARCHITECTURE.md
+README.md                     # Game design document
+ARCHITECTURE.MD               # This file - code architecture
+PLAN.md                       # Implementation roadmap
 ```
+
+### File Naming Conventions
+
+**Components** (header-only):
+- `ComponentName.h` - FLECS component struct definition
+- Example: `Transform.h`, `Microbe.h`
+
+**Systems** (implementation + header):
+- `SystemNameSystem.cpp/h` - FLECS system implementation
+- Example: `PhysicsSystem.cpp`, `RenderSystem.cpp`
+
+**Utilities** (pure functions):
+- `ModuleName.cpp/h` - Stateless utility functions
+- Example: `BodyFactory.cpp`, `Metaballs.cpp`
+
+**Tests**:
+- `test_ModuleName.cpp` - Tests for corresponding module
+- Example: `test_PhysicsSystem.cpp`
 
 ---
 
 ## 5) Build & Targets
 
-CMake targets:
+**CMake targets:**
+- `game.exe` - Main executable (Windows)
+- `tests.exe` - Test suite with headless screenshot output (Windows)
 
-- `game` (release/dev runtime)
-- `tests` (unit + GPU integration)
+**Build requirements:**
+- C++20 standard (required for FLECS and Jolt)
+- CMake 3.15+
+- MinGW-w64 cross-compiler (x86_64-w64-mingw32-gcc/g++)
+- OpenGL 4.6+ support (via Raylib, uses Windows GPU)
 
-Important build settings:
+**Development environment:**
+- WSL2 for building (cross-compilation to Windows)
+- Windows GPU for execution
 
-- `GRAPHICS_API_OPENGL_46` enforced at compile time.
-- No CPU fallback; GPU sim must initialize or the game exits.
-- Coverage target: **95%+** on core modules.
-- Build scripts: `bin/build.sh` (configure/build) and `bin/clean.sh` (cache cleanup).
+**Quality gates:**
+- All tests must pass before merge
+- Tests run headlessly and output screenshots for verification
+- **NEVER run game.exe during development** (opens disruptive window)
+- **ALL verification via test.exe** (headless screenshot output)
+- Coverage target: **95%+** on `/src` modules
+- Zero compiler warnings on MinGW
+
+**Build scripts:**
+- `bin/build.sh` - Cross-compile Windows .exe files
+- `bin/build.sh --clean` - Clean rebuild
 
 ---
 
@@ -185,106 +287,148 @@ typedef struct EngineContext {
 
 ---
 
-## 7) GPU-Accelerated Physics & Rendering
+## 7) The Simulation Loop (FLECS + Jolt)
 
-Physics simulation runs on GPU via **Bullet Physics OpenCL solver**. Rendering uses OpenGL shaders with GPU instancing. CPU handles high-level orchestration, input, and UI only.
+The architecture follows a **three-phase pipeline** that decouples simulation from rendering:
 
-### Physics Architecture: Bullet Soft Body Dynamics
+```
+┌─────────────────────────────────────────────────────────────┐
+│  INPUT PHASE (Raylib → FLECS)                               │
+│  - Poll Raylib input (mouse, keyboard, touch)               │
+│  - Write to FLECS InputComponent                            │
+│  - Single source of truth for input state                   │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  SIMULATION PHASE (FLECS Systems)                           │
+│                                                              │
+│  System_UpdatePhysics:                                      │
+│    - Step Jolt physics world (multi-threaded)              │
+│    - Apply EC&M forces to amoeba bodies                     │
+│    - Handle collisions and constraints                      │
+│                                                              │
+│  System_SyncTransforms:                                     │
+│    - Read Jolt body positions/rotations                     │
+│    - Write to FLECS Transform components                    │
+│                                                              │
+│  System_GameLogic:                                          │
+│    - Query FLECS entities (microbes, resources, etc.)       │
+│    - Update game state (health, resources, behaviors)       │
+│    - Spawn/destroy entities as needed                       │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  RENDER PHASE (FLECS → Raylib)                              │
+│                                                              │
+│  System_Render:                                             │
+│    - Query entities with Transform + Rendering components   │
+│    - Call Raylib DrawMesh/DrawSphere for each entity        │
+│    - Use camera from FLECS singleton                        │
+│                                                              │
+│  System_RenderMicrobes:                                     │
+│    - Query microbe entities                                 │
+│    - Sync particle positions to SSBO                        │
+│    - Use metaball shaders for organic rendering             │
+└─────────────────────────────────────────────────────────────┘
+```
 
-We use **Bullet Physics** soft body simulation with OpenCL GPU acceleration:
-- **Proven library**: Battle-tested physics engine used in games and simulation
-- **OpenCL GPU solver**: Parallel constraint solving on GPU for performance at scale
-- **Soft body nodes**: Particles connected by distance constraints (links)
-- **Material properties**: Configurable stiffness, damping, friction per microbe type
-- **Collision detection**: Bullet's broad-phase + narrow-phase with soft contact response
+### FLECS Component Architecture
 
-### Microbe Body Plan System
-
-Each microbe type has a unique **body plan** defining its physical structure:
-
+**Core Components**:
 ```cpp
-struct MicrobeBodyPlan {
-    int skeletonCount;              // Internal structural nodes
-    int membraneCount;              // Outer elastic nodes
-    vector<Vec3> skeletonPositions; // Relative to center
-    vector<Vec3> membranePositions; // Outer boundary
-    vector<ConstraintDef> constraints; // Links between nodes
-    float stiffness;                // Material stiffness
-    float damping;                  // Damping factor
+struct Transform {
+    Vec3 position;
+    Quat rotation;
+    Vec3 scale;
+};
+
+struct PhysicsBody {
+    JPH::BodyID bodyID;     // Jolt body handle
+    float mass;
+    bool isStatic;
+};
+
+struct Microbe {
+    MicrobeType type;
+    float seed;             // Procedural variation
+    Color color;
+};
+
+struct ECMLocomotion {
+    float phase;            // 0-1 cycle position
+    int pseudopodTarget;    // Which particle is extending
+    Vec3 pseudopodDir;      // Extension direction
 };
 ```
 
-**Example Body Plans**:
-- **Amoeba**: 16 skeleton (3 rings) + 16 membrane (circle) = 32 nodes, low stiffness
-- **Stentor**: 20 trumpet nodes + 10 contractile stalk nodes, moderate stiffness
-- **Lacrymaria**: 16 body + 30 neck chain nodes, very low neck stiffness
-- **Diatom**: 8 rigid frustule nodes, infinite stiffness (rigid body)
+**FLECS Pipeline Phases**:
+- `OnUpdate`: Physics, EC&M behavior, game logic
+- `OnStore`: Transform synchronization
+- `PostUpdate`: Rendering
 
-### Two-Layer Architecture
+### Jolt Physics Integration
 
+**Initialization**:
+```cpp
+// In PhysicsSystem::init()
+JPH::PhysicsSystem physicsSystem;
+physicsSystem.Init(maxBodies, numBodyMutexes, maxBodyPairs, maxContactConstraints,
+                   broadPhaseLayer, objectVsBroadPhase, objectVsObject);
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  PHYSICS LAYER (Bullet Soft Bodies)                         │
-│  - Each microbe = btSoftBody with type-specific node count  │
-│  - Nodes connected by distance constraints (btLink)         │
-│  - Bullet OpenCL solver runs constraint solving on GPU      │
-│  - Inter-microbe collisions via Bullet contact detection    │
-│  - EC&M forces applied as external forces to nodes          │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼ (sync node positions to SSBOs)
-┌─────────────────────────────────────────────────────────────┐
-│  RENDER LAYER (Metaball Surface)                            │
-│  - Smooth organic surface via metaball field rendering      │
-│  - All nodes render as billboards with alpha blending       │
-│  - Fragment shader computes metaball field: Σ(r²/d²)        │
-│  - Threshold field for surface boundary                     │
-│  - Skeleton nodes darker (organelles), membrane lighter     │
-│  - Surface deforms naturally with node movement             │
-└─────────────────────────────────────────────────────────────┘
-```
+
+**The Bridge (FLECS ↔ Jolt)**:
+1. **FLECS Observer**: When `PhysicsBody` component added to entity:
+   - Create Jolt body via `BodyInterface::CreateBody()`
+   - Store `BodyID` on entity
+2. **Sync Transform**: Every frame, read Jolt positions → write to FLECS `Transform`
+3. **Apply Forces**: Systems read FLECS components → apply forces via Jolt `BodyInterface`
+
+**Soft Body Microbes**:
+- Each microbe = cluster of connected Jolt spheres (lattice structure)
+- Distance constraints for deformability (like springs)
+- EC&M forces applied to outer particles
+- Inter-microbe collisions handled by Jolt
+
+**Multi-threading**:
+- Jolt job system uses all CPU cores
+- FLECS systems can run in parallel on independent queries
+- Physics substeps run in background while other systems prepare next frame
 
 ### Collision Requirements
 
-**REQ-COLLISION-001**: Microbes MUST collide with each other when their visual surfaces overlap, causing visible squishing and deformation.
+**REQ-COLLISION-001**: Microbes MUST collide when surfaces overlap, causing visible deformation.
 
-**REQ-COLLISION-002**: Collision response MUST be soft and elastic, allowing microbes to compress against each other like soft gel bodies.
+**REQ-COLLISION-002**: Collision response MUST be soft and elastic (gel-like).
 
-**REQ-COLLISION-003**: After collision, microbes MUST separate smoothly with a gentle bounce, not stick together or penetrate.
+**REQ-COLLISION-003**: After collision, microbes MUST separate smoothly.
 
-**REQ-COLLISION-004**: Collision radius MUST match the visual size of rendered microbes (metaball surface extent, not just particle centers).
+**REQ-COLLISION-004**: Collision radius MUST match visual size.
 
 **Implementation**:
-- Bullet's btSoftRigidDynamicsWorld handles all collision detection
-- Soft body contact parameters tuned for gel-like feel
-- Collision margin matches metaball visual extent
-- Material friction/restitution for controlled bouncing
+- Jolt's contact listener for collision events
+- Material properties (friction, restitution) tuned for soft response
+- Distance constraints allow compression/recovery
 
-### Amoeba Locomotion: EC&M Model (Hybrid Approach)
+### EC&M Locomotion (FLECS System)
 
-**Excitable Cortex & Memory (EC&M)** algorithm integrated with Bullet:
+**System_AmoebaBehavior** (runs in OnUpdate phase):
+```cpp
+void System_AmoebaBehavior(flecs::entity e, Transform& t, PhysicsBody& p, ECMLocomotion& ecm) {
+    // Update cycle phase
+    ecm.phase += dt / CYCLE_DURATION;
 
-1. **12-second cycle**: Extend (0-35%), Search (35-75%), Retract (75-100%)
-2. **Pseudopod selection**: One membrane node chosen per cycle
-3. **Force application**:
-   - Extension: `btSoftBody->addForce(outward_dir * strength, node_idx)`
-   - Search: Lateral wiggle (perpendicular force)
-   - Retraction: Opposite direction force
-4. **Bullet integration**: Forces drive soft body naturally via constraint solver
-
-### Physics Update Pipeline (per frame)
-
-1. **Apply external forces**: EC&M pseudopod forces, cursor attraction, bounds
-2. **Step Bullet simulation**: `world->stepSimulation(dt, iterations, dt)`
-3. **Sync to SSBOs**: Download node positions from Bullet → CPU buffer → GPU SSBO
-4. **Update microbe centers**: Compute center of mass from node positions
-
-### Data Layout (SSBOs for Rendering)
-
-- **Particles**: `vec4 pos, vec4 pos_prev, vec4 vel (xyz + microbe_id), vec4 data (is_membrane flag)`
-- **Microbes**: `vec4 center, vec4 color, vec4 params (type, stiffness, seed), vec4 aabb`
-
-SSBOs maintain compatibility with rendering system while physics runs in Bullet.
+    // Apply forces via Jolt
+    if (extend_phase) {
+        jolt->BodyInterface.AddForce(p.bodyID, pseudopod_force);
+    } else if (search_phase) {
+        jolt->BodyInterface.AddForce(p.bodyID, wiggle_force);
+    } else if (retract_phase) {
+        jolt->BodyInterface.AddForce(p.bodyID, retract_force);
+    }
+}
+```
 
 ---
 
@@ -325,24 +469,65 @@ Microbes render as **organic deformable metaballs** showing internal structure:
 
 ---
 
-## 9) Tests & Coverage
+## 9) Testing Strategy
 
-- Tests live in `/tests` and include GPU integration tests.
-- Coverage gate: **95%+** across core modules.
-- Coverage script: `bin/check_coverage.sh`.
+**Test Organization:**
+```
+/tests
+  test_main.cpp           # Test runner
+  test_time.cpp           # Platform layer tests
+  test_rng.cpp            # RNG tests
+  test_engine.cpp         # Engine init tests
+  test_game_constants.cpp # Constants validation
+
+  # New tests (to be added):
+  test_components.cpp     # FLECS component tests
+  test_physics_system.cpp # Jolt integration tests
+  test_ecm_locomotion.cpp # EC&M algorithm tests
+  test_rendering.cpp      # Metaball shader tests
+```
+
+**Testing Principles:**
+- Every component has a test
+- Every system has integration tests
+- Tests are small, fast, focused (one assertion per test preferred)
+- Use fixtures for complex setup
+- Mock Jolt physics for unit tests when needed
+
+**Coverage Requirements:**
+- **95%+** line coverage on `/src/components` and `/src/systems`
+- **90%+** branch coverage
+- Measure via `bin/check_coverage.sh` (uses gcov/lcov)
+
+**Test Naming Convention:**
+- `test_<module>_<function>_<scenario>`
+- Example: `test_transform_rotate_handlesZeroAngle`
 
 ---
 
 ## 10) Data & Assets
 
-- `data/raw` holds source assets.
-- `data/shaders` holds GLSL sources.
-- `data/baked` holds packed/processed outputs for release.
+```
+/data
+  /raw       # Source assets (PNG, WAV, OBJ, fonts)
+  /shaders   # GLSL shader sources (.vert, .frag, .comp)
+  /baked     # Processed outputs for release (packed archives, atlases)
+```
+
+**Asset Pipeline:**
+- Assets loaded from `data/raw` in dev mode
+- Assets packed to `data/baked/assets.pak` for release
+- Shaders compiled at runtime (cached)
 
 ---
 
-## 11) Roadmap Notes
+## 11) Future Modules
 
-- `engine/render` and `engine/assets` will expand as visuals and content scale.
-- `engine/io` will host VFS and pack reader logic.
-- `engine/debug` will grow into live inspection tooling for GPU state.
+Modules to be implemented as needed:
+
+- `/src/resources` - Resource management system (sodium, glucose, etc.)
+- `/src/progression` - DNA traits and upgrades
+- `/src/ui` - Game UI components (separate from engine UI)
+- `engine/assets` - Asset loading and caching
+- `engine/io` - VFS and serialization
+- `engine/debug` - Dev console, profiling overlay

@@ -44,11 +44,7 @@ int main(void) {
         return 1;
     }
 
-    while (true) {
-        PollInputEvents();
-        if (WindowShouldClose()) {
-            break;
-        }
+    while (!WindowShouldClose()) {
         float real_dt = GetFrameTime();
         (void)real_dt;
 
