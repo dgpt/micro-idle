@@ -74,7 +74,7 @@ components::SoftBody SoftBodyFactory::createAmoeba(
     }
 
     // Generate elastic mesh membrane (icosphere)
-    // Mesh vertices will be rendered as metaballs for smooth appearance
+    // Mesh vertices will be used for SDF raymarching rendering
     std::vector<Vector3> meshVertices;
     std::vector<int> meshTriangles;
     generateIcosphere(0, radius, meshVertices, meshTriangles);  // 0 subdivisions = 12 vertices (test)

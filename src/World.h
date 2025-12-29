@@ -39,19 +39,10 @@ private:
     flecs::world world;
     PhysicsSystemState* physics;
 
-    // Metaball rendering
-    Shader metaballShader;
-    Mesh billboardQuad;
-    bool shadersLoaded;
-
     // System registration
     void registerComponents();
     void registerSystems();
     void registerPhysicsObservers();
-
-    // Rendering helpers
-    void loadMetaballShaders();
-    void renderMicrobeParticles(const components::Microbe& microbe, Camera3D camera);
 };
 
 } // namespace micro_idle

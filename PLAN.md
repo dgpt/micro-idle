@@ -1,207 +1,342 @@
 # Micro-Idle Engine - Implementation Plan
 
 ## Current Status
-- **Phase**: 4 - Basic Microbe System Working
+- **Phase**: 0 - Clean Slate
 - **Last Updated**: 2025-12-28
-- **Status**: Physics, locomotion, and basic rendering working
-- **Known Issues**:
-  - Mesh looks low-poly (only 12 vertices, flat shading)
-  - Constraint creation hangs with >12 vertices (needs optimization)
-- **Completed**:
-  - ✅ Fixed crash (ECMLocomotionSystem division by zero)
-  - ✅ Mesh physics (cloth sim over skeleton) working
-  - ✅ EC&M locomotion working
-  - ✅ Mesh surface rendering (triangle drawing)
-  - ✅ No gravity / Y-axis locked for 2D simulation
+- **Status**: Architecture redesigned - implementing Puppet/SDF approach
+- **Architecture**: Jolt SoftBody physics → SDF Raymarching renderer
 
 ---
 
 ## Architecture Overview
 
+**New Approach: "The Puppet"**
+
+A clean separation between physics simulation and visual rendering:
+
+1. **Physics Layer (Jolt)**: Low-resolution soft body (icosphere, 32-64 vertices)
+   - Point cloud held together by distance constraints
+   - Volume constraint for internal pressure
+   - Collides with world and other entities
+   - Invisible to player (pure physics driver)
+
+2. **The Bridge**: Data transport system
+   - Extract vertex positions from Jolt every frame
+   - Flatten to shader-compatible format
+   - Update GPU uniforms
+
+3. **Rendering Layer (SDF Raymarcher)**: Smooth organic skin
+   - GPU fragment shader raymarches through volume
+   - SDF smooth union of all vertex positions
+   - Renders smooth blob over physics point cloud
+   - No mesh drawing - pure procedural rendering
+
 **Tech Stack**:
 - **Language**: C++20
-- **Build**: CMake with FetchContent/Git submodules
+- **Build**: CMake with FetchContent
 - **Framework**: Raylib 5.5 (windowing, input, rendering)
-- **Physics**: Jolt Physics (multi-threaded CPU)
+- **Physics**: Jolt Physics (multi-threaded CPU soft bodies)
 - **ECS**: FLECS (Entity Component System)
 
-**The Simulation Loop**:
-1. **Input Phase**: Raylib polls input → writes to FLECS `InputComponent`
-2. **Simulation Phase**:
-   - `System_UpdatePhysics`: Steps Jolt world
-   - `System_SyncTransforms`: Jolt → FLECS transform sync
-   - `System_GameLogic`: FLECS queries for game state updates
-3. **Render Phase**: FLECS queries → Raylib `DrawMesh()`
-
-**Platforms**: Windows, Linux, macOS, Android, iOS
+**Platforms**: Windows (primary), Linux, macOS
 
 ---
 
-## Phase 1: Foundation Setup
+## Phase 1: Clean Slate
 
-### 1.1 Documentation
-- [ ] Update README.md (FLECS, Jolt, C++20)
-- [ ] Update ARCHITECTURE.MD (Simulation Loop pattern)
-- [ ] Clean up old Bullet-related docs
+### 1.1 Remove Legacy Code
+- [x] Identify all metaball-related files
+- [ ] Remove all legacy shaders (metaball_*.vert/frag, xpbd_*.vert/frag)
+- [ ] Clean up legacy rendering code in src/
+- [ ] Remove game/game.cpp if obsolete
+- [ ] Remove any mesh-based rendering systems
 
-### 1.2 CMake Configuration
-- [ ] Set C++20 standard
-- [ ] Add FLECS via FetchContent (https://github.com/SanderMertens/flecs)
-- [ ] Add Jolt Physics via FetchContent (https://github.com/jrouwe/JoltPhysics)
-- [ ] Keep Raylib 5.5 configuration
-- [ ] Set optimization flags (-O3 for GCC/Clang, /O2 for MSVC)
-- [ ] Configure static linking
-- [ ] Remove Bullet dependencies
+### 1.2 Update Documentation
+- [x] Update ARCHITECTURE.MD with Puppet/SDF architecture
+- [x] Update PLAN.md (this file) with new roadmap
+- [ ] Update README.md to remove metaball references
 
-### 1.3 Directory Restructure
-- [ ] Create `/extern` for submodules (if using git submodules)
-- [ ] Create `/src/components` for FLECS components
-- [ ] Create `/src/systems` for FLECS systems
-- [ ] Remove old physics code (`game/physics.cpp`, `game/physics.h`, `game/xpbd.cpp`)
-- [ ] Remove old microbe bodies (`game/microbe_bodies.cpp`, `game/microbe_bodies.h`)
-- [ ] Clean up unused test files
-
-### 1.4 Build Verification
-- [ ] Build succeeds on current platform
-- [ ] All tests pass
-- [ ] Verify FLECS and Jolt link correctly
+### 1.3 Verify Clean Build
+- [ ] Build succeeds with remaining code
+- [ ] All existing tests pass
+- [ ] No compiler warnings
 
 ---
 
-## Phase 2: FLECS Core Integration
+## Phase 2: Foundation - Icosphere Generation
 
-### 2.1 Basic Components
-- [ ] Create `src/components/Transform.h` (Position, Rotation, Scale)
-- [ ] Create `src/components/Physics.h` (RigidBodyConfig, BodyID)
-- [ ] Create `src/components/Rendering.h` (MeshComponent, ColorComponent)
-- [ ] Create `src/components/Input.h` (InputComponent for cursor position)
+### 2.1 Icosphere Utility
+- [ ] Create `src/physics/Icosphere.h/cpp`
+- [ ] Implement `GenerateIcosphere(subdivisions)` function
+- [ ] Returns vertex positions and triangle indices
+- [ ] Target: 32-64 vertices (1-2 subdivisions)
+- [ ] Create `tests/test_icosphere.cpp`
+- [ ] Verify vertex count, topology correctness
 
-### 2.2 World Setup
-- [ ] Create `FlecsWorld` class wrapper
-- [ ] Initialize FLECS world in `main.cpp`
-- [ ] Set up FLECS pipeline phases (OnUpdate, OnStore, PostUpdate)
-- [ ] Basic entity creation/destruction
-
-### 2.3 Basic Systems
-- [ ] `System_UpdateInput`: Raylib → FLECS
-- [ ] `System_Render`: FLECS → Raylib (basic sphere rendering initially)
-- [ ] Verify entity spawning and rendering works
+### 2.2 Constraint Generation
+- [ ] Create `src/physics/Constraints.h/cpp`
+- [ ] Implement `GenerateEdgeConstraints(vertices, triangles)`
+- [ ] Generate distance constraints for each edge
+- [ ] Implement volume constraint configuration
+- [ ] Create `tests/test_constraints.cpp`
 
 ---
 
-## Phase 3: Jolt Physics Bridge
+## Phase 3: Jolt Soft Body Integration
 
-### 3.1 Jolt Initialization
-- [ ] Create `src/systems/PhysicsSystem.h/cpp`
-- [ ] Initialize Jolt `JPH::PhysicsSystem`
-- [ ] Configure job system (multi-threading)
-- [ ] Set up broad phase, object layers, contact listeners
-- [ ] Store as FLECS singleton component
+### 3.1 Soft Body Factory
+- [ ] Create `src/systems/SoftBodyFactory.h/cpp`
+- [ ] Implement `CreateSoftBodyAmoeba(world, position, scale)`
+- [ ] Configure `SoftBodyCreationSettings`:
+  - Icosphere vertices
+  - Edge constraints
+  - Volume constraint (internal pressure)
+  - Material properties (friction, restitution)
+- [ ] Return `JPH::BodyID`
 
-### 3.2 The Bridge (FLECS ↔ Jolt)
-- [ ] Create FLECS Observer for `RigidBodyConfig` component
-  - When added → create Jolt body, store `BodyID` on entity
-- [ ] Create FLECS Observer for component removal
-  - When removed → destroy Jolt body
-- [ ] Implement `System_SyncTransforms`:
-  - Read Jolt positions → write to FLECS `Transform`
+### 3.2 Physics System Update
+- [ ] Update `src/systems/PhysicsSystem.h/cpp`
+- [ ] Ensure Jolt soft body support is initialized
+- [ ] Configure collision filtering (soft body vs world, soft body vs soft body)
+- [ ] Test single soft body creation and stepping
 
-### 3.3 Physics Update Loop
-- [ ] `System_UpdatePhysics`: Step Jolt world each frame
-- [ ] Handle FLECS → Jolt teleportation (gameplay overrides)
-- [ ] Test with simple falling boxes or spheres
+### 3.3 Component Definition
+- [ ] Update `src/components/Physics.h`
+- [ ] Define `SoftBodyComponent`:
+  ```cpp
+  struct SoftBodyComponent {
+      JPH::BodyID bodyID;
+      int vertexCount;
+      float* vertexPositions;  // Flattened [x,y,z, x,y,z, ...]
+  };
+  ```
 
----
-
-## Phase 4: Microbe Entity Migration
-
-### 4.1 Microbe Components
-- [ ] Create `src/components/Microbe.h`:
-  - `MicrobeType` enum
-  - `ECMLocomotion` component (phase, pseudopod state)
-  - `MicrobeStats` (seed, color, size)
-
-### 4.2 Soft Body Physics (Jolt)
-- [ ] Research Jolt soft body support (or use multiple rigid bodies connected by constraints)
-- [ ] Create amoeba as cluster of connected spheres (lattice structure)
-- [ ] Configure Jolt distance constraints for deformability
-- [ ] Test single amoeba deformation
-
-### 4.3 EC&M Locomotion System
-- [ ] Port EC&M algorithm to FLECS system
-- [ ] `System_AmoebaBehavior`: Query entities with `ECMLocomotion`
-- [ ] Apply forces to Jolt bodies based on cycle phase
-- [ ] Verify amoeba movement works
+### 3.4 Test Soft Body
+- [ ] Create `tests/test_soft_body.cpp`
+- [ ] Verify soft body creation
+- [ ] Verify vertex extraction works
+- [ ] Test collision response
+- [ ] Test volume constraint (compression/expansion)
 
 ---
 
-## Phase 5: Rendering (Metaballs)
+## Phase 4: The Bridge - Physics to GPU
 
-### 5.1 Particle Data Sync
-- [ ] Create SSBO for particle positions (from Jolt soft body nodes)
-- [ ] `System_SyncParticles`: Jolt → GPU SSBO
-- [ ] Verify data reaches shader
+### 4.1 Data Extraction System
+- [ ] Create `src/systems/UpdateSDFUniforms.h/cpp`
+- [ ] Implement `System_UpdateSDFUniforms`:
+  - Query entities with `SoftBodyComponent` + `SDFRenderComponent`
+  - Lock Jolt BodyInterface
+  - Extract vertex positions from soft body
+  - Convert `JPH::RVec3` → `float[3]`
+  - Flatten to contiguous array
+  - Update `SoftBodyComponent.vertexPositions`
 
-### 5.2 Metaball Shaders
-- [ ] Create `data/shaders/metaball.vert`
-- [ ] Create `data/shaders/metaball.frag`
-- [ ] Implement metaball field rendering (instanced billboards)
-- [ ] Load shaders in rendering system
+### 4.2 Shader Uniform Update
+- [ ] In `System_UpdateSDFUniforms`:
+  - Get shader location for `uPoints[]`
+  - Call `SetShaderValueV(shader, loc, positions, SHADER_UNIFORM_VEC3, count)`
+  - Update once per frame
 
-### 5.3 Microbe Renderer
-- [ ] `System_RenderMicrobes`: Use metaball shaders
-- [ ] Bind particle SSBO
-- [ ] Draw instanced quads (one per particle)
-- [ ] Verify organic blob appearance
+### 4.3 Test Bridge System
+- [ ] Create `tests/test_sdf_uniforms.cpp`
+- [ ] Mock soft body with known positions
+- [ ] Verify data extraction is correct
+- [ ] Verify shader uniform format matches expectation
 
 ---
 
-## Phase 6: Scaling & Optimization
+## Phase 5: SDF Raymarching Renderer
 
-### 6.1 Performance Testing
-- [ ] Spawn 100+ microbes
-- [ ] Profile frame times
-- [ ] Profile Jolt simulation time
+### 5.1 SDF Shaders
+- [ ] Create `data/shaders/sdf_raymarch.vert`
+  - Standard MVP transformation
+  - Pass world position and view direction to fragment shader
+- [ ] Create `data/shaders/sdf_raymarch.frag`
+  - Define `uniform vec3 uPoints[64]`
+  - Define `uniform int uPointCount`
+  - Implement `sdSphere(p, center, radius)`
+  - Implement `sdSmoothUnion(d1, d2, k)` (smin)
+  - Implement `sceneSDF(p)` (loop over uPoints)
+  - Implement raymarch loop
+  - Implement normal calculation (SDF gradient)
+  - Implement basic Blinn-Phong lighting
+- [ ] Test shader compilation
+
+### 5.2 Bounding Volume Generator
+- [ ] Create `src/rendering/RaymarchBounds.h/cpp`
+- [ ] Implement `GenerateBoundingCube(center, size)`
+- [ ] Returns Raylib `Model` (inverted cube mesh)
+- [ ] Scale to encompass soft body extents
+
+### 5.3 SDF Render System
+- [ ] Create `src/systems/SDFRenderSystem.h/cpp`
+- [ ] Implement `System_SDFRender`:
+  - Query entities with `Transform` + `SoftBodyComponent` + `SDFRenderComponent`
+  - Set shader uniforms (already updated by UpdateSDFUniforms)
+  - Bind shader
+  - Draw bounding volume
+  - Unbind shader
+
+### 5.4 Component Definition
+- [ ] Update `src/components/Rendering.h`
+- [ ] Define `SDFRenderComponent`:
+  ```cpp
+  struct SDFRenderComponent {
+      Shader sdfShader;
+      int shaderLocPoints;
+      int shaderLocPointCount;
+      int shaderLocCameraPos;
+      Model boundingVolume;
+  };
+  ```
+
+### 5.5 Test Rendering
+- [ ] Create `tests/test_sdf_render.cpp`
+- [ ] Headless render test (screenshot verification)
+- [ ] Verify bounding volume is drawn
+- [ ] Verify shader uniforms are correctly bound
+- [ ] Visual test: single static soft body renders as smooth blob
+
+---
+
+## Phase 6: Integration - Full Pipeline
+
+### 6.1 Entity Creation Helper
+- [ ] Create `src/World.cpp/h` helper function:
+  - `CreateAmoeba(world, position, color, seed)`
+  - Spawns entity with all required components
+  - Creates Jolt soft body
+  - Loads SDF shader
+  - Generates bounding volume
+  - Returns entity ID
+
+### 6.2 Main Loop Integration
+- [ ] Update `bin/main.cpp`:
+  - Initialize FLECS world
+  - Initialize PhysicsSystem (Jolt)
+  - Register all systems in correct pipeline order:
+    1. Input (OnUpdate)
+    2. Physics (OnUpdate)
+    3. Transform Sync (OnStore)
+    4. SDF Uniform Update (OnStore)
+    5. Render (PostUpdate)
+  - Spawn test amoeba
+  - Run main loop
+
+### 6.3 Visual Verification
+- [ ] Create `tests/visual_test.cpp`
+- [ ] Spawn single amoeba
+- [ ] Let physics run for 60 frames
+- [ ] Capture screenshot
+- [ ] Verify blob is visible and smooth
+- [ ] Verify soft body deformation (if forces applied)
+
+---
+
+## Phase 7: EC&M Locomotion
+
+### 7.1 EC&M Behavior System
+- [ ] Create `src/systems/ECMBehaviorSystem.h/cpp`
+- [ ] Implement `System_AmoebaBehavior`:
+  - Query entities with `ECMLocomotion` + `SoftBodyComponent`
+  - Update phase: `ecm.phase += dt / CYCLE_DURATION`
+  - State machine:
+    - **Extend** (0.0 - 0.4): Apply outward force to target vertex
+    - **Search** (0.4 - 0.7): Apply lateral wiggle forces
+    - **Retract** (0.7 - 1.0): Apply inward force to all vertices
+  - Pseudopod selection: choose vertex on leading edge
+  - Apply forces via `BodyInterface.AddForce(bodyID, vertexIndex, force)`
+
+### 7.2 Component Definition
+- [ ] Update `src/components/Microbe.h`
+- [ ] Define `ECMLocomotion`:
+  ```cpp
+  struct ECMLocomotion {
+      float phase;              // 0.0 - 1.0
+      int pseudopodTarget;      // Vertex index
+      Vec3 pseudopodDir;        // Extension direction
+      float cycleTime;          // 12 seconds default
+  };
+  ```
+
+### 7.3 Test EC&M
+- [ ] Create `tests/test_ecm_locomotion.cpp`
+- [ ] Verify phase progression
+- [ ] Verify force application at correct vertices
+- [ ] Visual test: amoeba extends pseudopod, wiggles, retracts
+- [ ] Verify net displacement over multiple cycles
+
+---
+
+## Phase 8: Collision & Multi-Entity
+
+### 8.1 Collision Configuration
+- [ ] Configure Jolt collision layers:
+  - Soft body vertices collide with ground
+  - Soft body vertices collide with other soft body vertices
+  - Test collision filtering
+
+### 8.2 Ground Plane
+- [ ] Create static ground plane (Jolt box body)
+- [ ] Verify soft bodies rest on ground
+- [ ] Verify soft deformation on impact
+
+### 8.3 Multi-Entity Test
+- [ ] Spawn 2-3 amoebas in proximity
+- [ ] Verify inter-amoeba collision
+- [ ] Verify soft squishing behavior
+- [ ] Verify separation after collision
+- [ ] Visual test: amoebas collide and deform realistically
+
+---
+
+## Phase 9: Polish & Optimization
+
+### 9.1 Shader Optimization
+- [ ] Profile fragment shader performance
+- [ ] Optimize raymarch step count
+- [ ] Implement early ray termination
+- [ ] Add bounding sphere culling
+
+### 9.2 Camera System
+- [ ] Implement simple camera controller
+- [ ] Orbit camera around scene
+- [ ] Zoom in/out
+- [ ] Lock to 2D plane (top-down view)
+
+### 9.3 Visual Polish
+- [ ] Tune SDF smoothness parameter
+- [ ] Tune vertex radius for desired blob appearance
+- [ ] Add color variation per microbe
+- [ ] Test different lighting models (ambient, diffuse, specular)
+
+### 9.4 Performance Testing
+- [ ] Spawn 10+ amoebas
+- [ ] Profile frame time
+- [ ] Profile physics time
+- [ ] Profile render time
 - [ ] Identify bottlenecks
-
-### 6.2 Jolt Multi-threading
-- [ ] Configure Jolt job system for max CPU cores
-- [ ] Test performance improvement
-- [ ] Verify determinism (if needed)
-
-### 6.3 FLECS Optimization
-- [ ] Use FLECS queries efficiently (cache queries)
-- [ ] Add/remove entities in batches
-- [ ] Profile FLECS system overhead
+- [ ] Optimize as needed
 
 ---
 
-## Phase 7: Additional Microbe Types
+## Phase 10: Future Extensions
 
-### 7.1 New Body Plans
-- [ ] Stentor (trumpet shape)
-- [ ] Lacrymaria (extendable neck)
-- [ ] Heliozoa (radiating spines)
-- [ ] Bacteria (simple spheres/rods)
+### 10.1 Additional Microbe Types
+- [ ] Stentor (elongated soft body)
+- [ ] Heliozoa (spikes via separate rigid bodies)
+- [ ] Different icosphere resolutions per type
 
-### 7.2 Type-Specific Systems
-- [ ] `System_StentorBehavior`
-- [ ] `System_LacrymariaBehavior`
-- [ ] Rendering variants (shader switches)
+### 10.2 Rendering Variations
+- [ ] Type-specific shader variants
+- [ ] Internal structure rendering (skeleton nodes)
+- [ ] Transparency/alpha blending
 
----
-
-## Phase 8: Cross-Platform
-
-### 8.1 Platform Abstractions
-- [ ] `GetResourcePath()` wrapper (Desktop vs Android vs iOS)
-- [ ] Main loop abstraction (while loop vs OS callback)
-- [ ] Test on Linux
-
-### 8.2 Mobile Preparation
-- [ ] Android NDK build configuration
-- [ ] iOS Xcode project generation
-- [ ] Test build (if devices available)
+### 10.3 Gameplay Systems
+- [ ] Resource drops on destruction
+- [ ] Player interaction (click to destroy)
+- [ ] Spawning system
 
 ---
 
@@ -211,7 +346,7 @@
 **Build**: CMakeLists.txt, bin/build.sh
 **Components**: src/components/*.h
 **Systems**: src/systems/*.cpp
-**Shaders**: data/shaders/metaball.*
+**Shaders**: data/shaders/sdf_raymarch.*
 **Main**: bin/main.cpp
 
 ---
@@ -219,14 +354,29 @@
 ## Cleanup Checklist
 
 Files to DELETE:
-- [ ] `game/physics.cpp` (old Bullet code)
-- [ ] `game/physics.h` (old Bullet code)
-- [ ] `game/xpbd.cpp` (legacy XPBD solver)
-- [ ] `game/microbe_bodies.cpp` (old body plans)
-- [ ] `game/microbe_bodies.h` (old body plans)
-- [ ] Any Bullet-specific test files
+- [x] Identified legacy shader files (metaball_*, xpbd_*)
+- [ ] `data/shaders/metaball.vert/frag`
+- [ ] `data/shaders/metaball_field.vert/frag`
+- [ ] `data/shaders/metaball_surface.vert/frag`
+- [ ] `data/shaders/xpbd_microbe.vert/frag`
+- [ ] `data/shaders/particle_simple.vert/frag`
+- [ ] `data/shaders/outline.vert/frag`
+- [ ] `data/shaders/outline_curve.vert/frag`
+- [ ] Any obsolete mesh rendering code in src/
+- [ ] Any obsolete rendering components/systems
 
-Dependencies to REMOVE from CMake:
-- [ ] Bullet Physics FetchContent
-- [ ] All Bullet library links
-- [ ] OpenCL detection (not needed with Jolt)
+Code to REFACTOR:
+- [ ] Keep PhysicsSystem.cpp (update for soft bodies)
+- [ ] Keep SoftBodyFactory.cpp (update for new approach)
+- [ ] Keep ECMLocomotionSystem.cpp (update to apply forces to vertices)
+- [ ] Keep World.cpp (update entity creation)
+- [ ] Remove any metaball/mesh rendering code
+
+---
+
+## Next Immediate Steps
+
+1. Remove all legacy shader files
+2. Update README.md
+3. Verify clean build
+4. Begin Phase 2: Icosphere generation

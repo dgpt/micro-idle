@@ -12,7 +12,7 @@
 
 namespace micro_idle {
 
-World::World() : shadersLoaded(false) {
+World::World() {
     printf("FLECS World: Initializing...\n");
     fflush(stdout);
 
@@ -27,19 +27,12 @@ World::World() : shadersLoaded(false) {
     // Create singleton for input state
     world.set<components::InputState>({});
 
-    // Load metaball shaders
-    loadMetaballShaders();
-
     printf("FLECS World: Ready\n");
     fflush(stdout);
 }
 
 World::~World() {
     printf("FLECS World: Shutting down\n");
-    if (shadersLoaded) {
-        UnloadShader(metaballShader);
-        UnloadMesh(billboardQuad);
-    }
     delete physics;
 }
 
@@ -295,88 +288,6 @@ void World::createPetriDish(Vector3 position, float radius, float edgeHeight) {
     }
 
     printf("Petri dish created with %d edge segments\n", segmentCount);
-}
-
-void World::loadMetaballShaders() {
-    // Load custom metaball shaders
-    const char* vsPath = "data/shaders/metaball.vert";
-    const char* fsPath = "data/shaders/metaball.frag";
-
-    if (FileExists(vsPath) && FileExists(fsPath)) {
-        metaballShader = LoadShader(vsPath, fsPath);
-        if (metaballShader.id > 0) {
-            printf("Metaball shaders loaded successfully\n");
-
-            // Create billboard quad mesh (will be drawn for each particle)
-            billboardQuad = GenMeshPlane(2.0f, 2.0f, 1, 1);
-
-            shadersLoaded = true;
-        } else {
-            printf("Warning: Failed to load metaball shaders\n");
-            shadersLoaded = false;
-        }
-    } else {
-        printf("Warning: Metaball shader files not found, using fallback rendering\n");
-        shadersLoaded = false;
-    }
-}
-
-void World::renderMicrobeParticles(const components::Microbe& microbe, Camera3D camera) {
-    if (microbe.softBody.particleBodyIDs.empty()) return;
-
-    JPH::BodyInterface& bodyInterface = physics->physicsSystem->GetBodyInterface();
-
-    // Calculate camera vectors for billboarding
-    Vector3 cameraForward = Vector3Subtract(camera.target, camera.position);
-    cameraForward = Vector3Normalize(cameraForward);
-    Vector3 cameraRight = Vector3CrossProduct(camera.up, cameraForward);
-    cameraRight = Vector3Normalize(cameraRight);
-    Vector3 cameraUp = Vector3CrossProduct(cameraForward, cameraRight);
-    cameraUp = Vector3Normalize(cameraUp);
-
-    // Set shader uniforms (camera right/up for billboarding)
-    int rightLoc = GetShaderLocation(metaballShader, "cameraRight");
-    int upLoc = GetShaderLocation(metaballShader, "cameraUp");
-    SetShaderValue(metaballShader, rightLoc, &cameraRight, SHADER_UNIFORM_VEC3);
-    SetShaderValue(metaballShader, upLoc, &cameraUp, SHADER_UNIFORM_VEC3);
-
-    // Begin shader mode
-    BeginShaderMode(metaballShader);
-
-    // Render each particle as a soft billboard
-    for (size_t i = 0; i < microbe.softBody.particleBodyIDs.size(); i++) {
-        JPH::BodyID bodyID = microbe.softBody.particleBodyIDs[i];
-        JPH::RVec3 pos = bodyInterface.GetPosition(bodyID);
-        Vector3 position = {(float)pos.GetX(), (float)pos.GetY(), (float)pos.GetZ()};
-
-        // Determine particle radius and color
-        float radius;
-        Color color = microbe.stats.color;
-
-        if ((int)i < microbe.softBody.skeletonParticleCount) {
-            // Skeleton particle (internal)
-            radius = microbe.stats.baseRadius / 15.0f;
-            color.r = (unsigned char)(color.r * 0.6f);
-            color.g = (unsigned char)(color.g * 0.6f);
-            color.b = (unsigned char)(color.b * 0.6f);
-        } else {
-            // Membrane particle (surface)
-            radius = microbe.stats.baseRadius / 8.0f;
-        }
-
-        // Set per-particle uniforms
-        int radiusLoc = GetShaderLocation(metaballShader, "instanceRadius");
-        int colorLoc = GetShaderLocation(metaballShader, "instanceColor");
-        Vector4 colorVec = {color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, color.a / 255.0f};
-
-        SetShaderValue(metaballShader, radiusLoc, &radius, SHADER_UNIFORM_FLOAT);
-        SetShaderValue(metaballShader, colorLoc, &colorVec, SHADER_UNIFORM_VEC4);
-
-        // Draw billboard at particle position
-        DrawMesh(billboardQuad, LoadMaterialDefault(), MatrixTranslate(position.x, position.y, position.z));
-    }
-
-    EndShaderMode();
 }
 
 } // namespace micro_idle

@@ -113,7 +113,7 @@ Non-compliance with requirements marked "Mandatory" is not permitted. Code revie
 - **Language:** C++20
 - **Framework:** Raylib 5.5 (window/input/audio/rendering)
 - **ECS:** FLECS (Entity Component System)
-- **Physics:** Jolt Physics (multi-threaded CPU)
+- **Physics:** Jolt Physics (multi-threaded CPU soft body simulation)
 - **Graphics:** OpenGL 4.6 / Metal / Vulkan (platform-dependent, via Raylib)
   - Linux: OpenGL 4.6 via Mesa
   - macOS: Metal via Raylib backend
@@ -133,31 +133,34 @@ Non-compliance with requirements marked "Mandatory" is not permitted. Code revie
 ### Directory Structure
 
 ```
-/src                          # NEW - All game code (FLECS/Jolt based)
+/src                          # All game code (FLECS/Jolt based)
   /components                 # FLECS component definitions (header-only)
     Transform.h               # Position, rotation, scale
-    PhysicsBody.h             # Jolt BodyID, mass, collision shape
+    Physics.h                 # Jolt BodyID, soft body reference
     Microbe.h                 # MicrobeType, seed, stats
     ECMLocomotion.h           # EC&M state machine data
-    Rendering.h               # Color, mesh reference, visibility
+    Rendering.h               # Shader reference, SDF parameters
     Input.h                   # Input state component
 
   /systems                    # FLECS systems (one system per file)
     PhysicsSystem.cpp/h       # Jolt initialization, world stepping
+    SoftBodyFactory.cpp/h     # Create Jolt soft bodies (icosphere)
     TransformSyncSystem.cpp/h # Jolt → FLECS transform sync
     ECMBehaviorSystem.cpp/h   # EC&M algorithm implementation
-    RenderSystem.cpp/h        # FLECS → Raylib rendering
+    SDFRenderSystem.cpp/h     # SDF raymarcher rendering
+    UpdateSDFUniforms.cpp/h   # Bridge: Physics → GPU data transport
     InputSystem.cpp/h         # Raylib → FLECS input capture
 
   /physics                    # Jolt physics utilities (pure functions)
-    BodyFactory.cpp/h         # createSphere(), createSoftBody(), etc.
-    Constraints.cpp/h         # Distance constraints, springs
+    SoftBodyConfig.cpp/h      # Soft body creation settings
+    Constraints.cpp/h         # Distance/volume constraints
     Materials.cpp/h           # Friction, restitution presets
+    Icosphere.cpp/h           # Icosphere mesh generation
 
   /rendering                  # Rendering utilities (pure functions)
-    Metaballs.cpp/h           # Metaball field calculations
+    SDFShader.cpp/h           # SDF shader loading and management
+    RaymarchBounds.cpp/h      # Bounding volume generation
     ShaderLoader.cpp/h        # Load and compile shaders
-    ParticleSync.cpp/h        # Sync particles to SSBO
 
   /math                       # Math utilities (header-only, pure)
     Vec3.h                    # 3D vector operations
@@ -174,20 +177,19 @@ Non-compliance with requirements marked "Mandatory" is not permitted. Code revie
     rng.cpp/h                 # Random number generation
     logging.h                 # Logging macros (header-only)
 
-/game                         # Legacy code (being phased out)
-  game.cpp/h                  # Old game loop (will migrate to /src)
-
 /tests                        # Tests mirror /src structure
   /components                 # Component tests
     test_Transform.cpp
-    test_PhysicsBody.cpp
+    test_Physics.cpp
   /systems                    # System tests
     test_PhysicsSystem.cpp
+    test_SoftBodyFactory.cpp
     test_ECMBehaviorSystem.cpp
   /physics                    # Physics utility tests
-    test_BodyFactory.cpp
+    test_SoftBodyConfig.cpp
+    test_Icosphere.cpp
   /rendering                  # Rendering utility tests
-    test_Metaballs.cpp
+    test_SDFShader.cpp
 
   test_main.cpp               # Test runner
   test_time.cpp               # Platform tests
@@ -196,8 +198,8 @@ Non-compliance with requirements marked "Mandatory" is not permitted. Code revie
 
 /data
   /shaders                    # GLSL shaders
-    metaball.vert
-    metaball.frag
+    sdf_raymarch.vert         # SDF raymarcher vertex shader
+    sdf_raymarch.frag         # SDF raymarcher fragment shader
   /raw                        # Source assets (future)
 
 /bin                          # Build scripts
@@ -219,11 +221,11 @@ PLAN.md                       # Implementation roadmap
 
 **Systems** (implementation + header):
 - `SystemNameSystem.cpp/h` - FLECS system implementation
-- Example: `PhysicsSystem.cpp`, `RenderSystem.cpp`
+- Example: `PhysicsSystem.cpp`, `SDFRenderSystem.cpp`
 
 **Utilities** (pure functions):
 - `ModuleName.cpp/h` - Stateless utility functions
-- Example: `BodyFactory.cpp`, `Metaballs.cpp`
+- Example: `SoftBodyConfig.cpp`, `Icosphere.cpp`
 
 **Tests**:
 - `test_ModuleName.cpp` - Tests for corresponding module
@@ -305,12 +307,17 @@ The architecture follows a **three-phase pipeline** that decouples simulation fr
 │                                                              │
 │  System_UpdatePhysics:                                      │
 │    - Step Jolt physics world (multi-threaded)              │
-│    - Apply EC&M forces to amoeba bodies                     │
+│    - Apply EC&M forces to soft body vertices               │
 │    - Handle collisions and constraints                      │
 │                                                              │
 │  System_SyncTransforms:                                     │
-│    - Read Jolt body positions/rotations                     │
+│    - Read Jolt soft body positions                          │
 │    - Write to FLECS Transform components                    │
+│                                                              │
+│  System_UpdateSDFUniforms:                                  │
+│    - Extract soft body vertex positions                     │
+│    - Flatten to float array                                 │
+│    - Update shader uniforms                                 │
 │                                                              │
 │  System_GameLogic:                                          │
 │    - Query FLECS entities (microbes, resources, etc.)       │
@@ -322,15 +329,12 @@ The architecture follows a **three-phase pipeline** that decouples simulation fr
 ┌─────────────────────────────────────────────────────────────┐
 │  RENDER PHASE (FLECS → Raylib)                              │
 │                                                              │
-│  System_Render:                                             │
-│    - Query entities with Transform + Rendering components   │
-│    - Call Raylib DrawMesh/DrawSphere for each entity        │
+│  System_SDFRender:                                          │
+│    - Query entities with SDF rendering components           │
+│    - Draw bounding volume (inverted cube)                   │
+│    - Bind SDF shader with vertex position uniforms          │
+│    - Raymarcher computes smooth skin over point cloud       │
 │    - Use camera from FLECS singleton                        │
-│                                                              │
-│  System_RenderMicrobes:                                     │
-│    - Query microbe entities                                 │
-│    - Sync particle positions to SSBO                        │
-│    - Use metaball shaders for organic rendering             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -344,28 +348,34 @@ struct Transform {
     Vec3 scale;
 };
 
-struct PhysicsBody {
-    JPH::BodyID bodyID;     // Jolt body handle
-    float mass;
-    bool isStatic;
+struct SoftBodyComponent {
+    JPH::BodyID bodyID;        // Jolt soft body handle
+    int vertexCount;           // Number of vertices (32-64)
+    float* vertexPositions;    // Flattened world space positions
 };
 
 struct Microbe {
     MicrobeType type;
-    float seed;             // Procedural variation
+    float seed;                // Procedural variation
     Color color;
 };
 
 struct ECMLocomotion {
-    float phase;            // 0-1 cycle position
-    int pseudopodTarget;    // Which particle is extending
-    Vec3 pseudopodDir;      // Extension direction
+    float phase;               // 0-1 cycle position
+    int pseudopodTarget;       // Which vertex is extending
+    Vec3 pseudopodDir;         // Extension direction
+};
+
+struct SDFRenderComponent {
+    Shader sdfShader;
+    int shaderLocPoints;       // Uniform location for vertex positions
+    Model boundingVolume;      // Cube for raymarching bounds
 };
 ```
 
 **FLECS Pipeline Phases**:
 - `OnUpdate`: Physics, EC&M behavior, game logic
-- `OnStore`: Transform synchronization
+- `OnStore`: Transform synchronization, SDF uniform updates
 - `PostUpdate`: Rendering
 
 ### Jolt Physics Integration
@@ -378,18 +388,35 @@ physicsSystem.Init(maxBodies, numBodyMutexes, maxBodyPairs, maxContactConstraint
                    broadPhaseLayer, objectVsBroadPhase, objectVsObject);
 ```
 
-**The Bridge (FLECS ↔ Jolt)**:
-1. **FLECS Observer**: When `PhysicsBody` component added to entity:
-   - Create Jolt body via `BodyInterface::CreateBody()`
-   - Store `BodyID` on entity
-2. **Sync Transform**: Every frame, read Jolt positions → write to FLECS `Transform`
-3. **Apply Forces**: Systems read FLECS components → apply forces via Jolt `BodyInterface`
+**The Puppet Architecture (Physics → Rendering Bridge)**:
 
-**Soft Body Microbes**:
-- Each microbe = cluster of connected Jolt spheres (lattice structure)
-- Distance constraints for deformability (like springs)
-- EC&M forces applied to outer particles
-- Inter-microbe collisions handled by Jolt
+1. **Physics Layer**: Jolt Soft Body
+   - Low-resolution icosphere (32-64 vertices)
+   - Distance constraints (edges) hold structure together
+   - Volume constraint maintains internal pressure
+   - Vertices collide with world and other entities
+   - Invisible to player (pure physics driver)
+
+2. **The Bridge**: `System_UpdateSDFUniforms`
+   - Locks Jolt BodyInterface
+   - Extracts current world space vertex positions
+   - Flattens to `float positions[MAX_VERTS * 3]`
+   - Updates shader uniform every frame
+
+3. **Rendering Layer**: SDF Raymarcher
+   - Draws bounding cube (not the soft body mesh itself)
+   - Fragment shader raymarches through volume
+   - For each ray step: compute SDF as smooth union of all vertex positions
+   - Renders smooth organic skin over the point cloud
+   - Normal calculated from SDF gradient
+
+**Soft Body Configuration**:
+```cpp
+SoftBodyCreationSettings settings;
+settings.mVertices = GenerateIcosphere(subdivisions);  // 32-64 verts
+settings.mEdgeConstraints = GenerateEdgeConstraints(mesh);
+settings.mVolumeConstraints = { VolumeConstraint(...) };  // Internal pressure
+```
 
 **Multi-threading**:
 - Jolt job system uses all CPU cores
@@ -409,23 +436,25 @@ physicsSystem.Init(maxBodies, numBodyMutexes, maxBodyPairs, maxContactConstraint
 **Implementation**:
 - Jolt's contact listener for collision events
 - Material properties (friction, restitution) tuned for soft response
-- Distance constraints allow compression/recovery
+- Soft body vertices deform on collision
+- SDF renderer shows deformation in real-time
 
 ### EC&M Locomotion (FLECS System)
 
 **System_AmoebaBehavior** (runs in OnUpdate phase):
 ```cpp
-void System_AmoebaBehavior(flecs::entity e, Transform& t, PhysicsBody& p, ECMLocomotion& ecm) {
+void System_AmoebaBehavior(flecs::entity e, Transform& t, SoftBodyComponent& sb, ECMLocomotion& ecm) {
     // Update cycle phase
     ecm.phase += dt / CYCLE_DURATION;
 
-    // Apply forces via Jolt
+    // Apply forces to specific vertices via Jolt
     if (extend_phase) {
-        jolt->BodyInterface.AddForce(p.bodyID, pseudopod_force);
+        int targetVertex = ecm.pseudopodTarget;
+        jolt->BodyInterface.AddForce(sb.bodyID, targetVertex, pseudopod_force);
     } else if (search_phase) {
-        jolt->BodyInterface.AddForce(p.bodyID, wiggle_force);
+        jolt->BodyInterface.AddForce(sb.bodyID, targetVertex, wiggle_force);
     } else if (retract_phase) {
-        jolt->BodyInterface.AddForce(p.bodyID, retract_force);
+        jolt->BodyInterface.AddForce(sb.bodyID, targetVertex, retract_force);
     }
 }
 ```
@@ -434,38 +463,80 @@ void System_AmoebaBehavior(flecs::entity e, Transform& t, PhysicsBody& p, ECMLoc
 
 ## 8) Rendering & Visuals
 
-### Metaball Rendering System
+### SDF Raymarching System
 
-Microbes render as **organic deformable metaballs** showing internal structure:
+Microbes render as **smooth organic blobs** via GPU raymarching over the physics point cloud:
 
 **Technique**:
-1. **GPU instancing**: One instanced draw call renders all particle billboards
-2. **Metaball field**: Fragment shader computes `field = Σ(r²/d²)` for nearby particles
-3. **Surface threshold**: Discard fragments below iso-value (e.g., 0.5)
-4. **Alpha blending**: Smooth transparency based on field gradient
-5. **Internal structure**: Skeleton nodes render darker (organelles), membrane nodes lighter
+1. **Bounding Volume**: Draw inverted cube scaled to encompass soft body
+2. **Raymarch Loop**: Fragment shader marches ray through volume
+3. **SDF Function**: `sdSmoothUnion` (smin) of all vertex positions
+4. **Surface Detection**: When distance < threshold, render surface
+5. **Lighting**: Blinn-Phong based on SDF gradient (surface normal)
 
 **Shader Pipeline**:
-- **Vertex shader**: Billboard particles in world space (2 triangles per particle)
-- **Fragment shader**:
-  - Compute distance to particle center
-  - Calculate metaball contribution
-  - Threshold for surface boundary
-  - Modulate alpha by field strength (thick = opaque, thin = transparent)
-  - Color variation (skeleton dark, membrane light, pseudopod tips bright)
+- **Vertex shader** (`sdf_raymarch.vert`):
+  - Standard MVP transformation
+  - Pass ray origin and direction to fragment shader
 
-**Type-Specific Variants**:
-- **Soft deformable** (amoeba, stentor): Full metaball blending
-- **Spiked** (heliozoa, radiolarian): Thin line rendering for axopodia/spines
-- **Rigid** (diatom): Geometric shell with hard edges
-- **Ciliated** (stentor): Motion blur or flow lines around cilia
+- **Fragment shader** (`sdf_raymarch.frag`):
+  ```glsl
+  uniform vec3 uPoints[64];  // Soft body vertex positions
+  uniform int uPointCount;
+  uniform vec3 uCameraPos;
+
+  float sdSphere(vec3 p, vec3 center, float radius) {
+      return length(p - center) - radius;
+  }
+
+  float sdSmoothUnion(float d1, float d2, float k) {
+      float h = clamp(0.5 + 0.5 * (d2 - d1) / k, 0.0, 1.0);
+      return mix(d2, d1, h) - k * h * (1.0 - h);
+  }
+
+  float sceneSDF(vec3 p) {
+      float d = sdSphere(p, uPoints[0], VERTEX_RADIUS);
+      for (int i = 1; i < uPointCount; i++) {
+          d = sdSmoothUnion(d, sdSphere(p, uPoints[i], VERTEX_RADIUS), SMOOTHNESS);
+      }
+      return d;
+  }
+
+  void main() {
+      // Raymarch from camera through fragment
+      vec3 rayDir = normalize(fragWorldPos - uCameraPos);
+      vec3 rayPos = fragWorldPos;
+
+      for (int step = 0; step < MAX_STEPS; step++) {
+          float dist = sceneSDF(rayPos);
+          if (dist < EPSILON) {
+              // Hit surface - calculate normal and light
+              vec3 normal = calcNormal(rayPos);
+              vec3 color = blinnPhong(rayPos, normal, uCameraPos);
+              FragColor = vec4(color, 1.0);
+              return;
+          }
+          rayPos += rayDir * dist;
+      }
+
+      discard;  // No hit
+  }
+  ```
 
 **Advantages**:
 - Naturally organic, blob-like appearance
-- Shows internal organelles through semi-transparent membrane
-- Thin pseudopods render correctly (field varies with deformation)
+- Smooth deformation reflects physics state in real-time
+- No mesh rendering artifacts
 - Single system handles diverse microbe morphologies
-- Deformation reflects physics state in real-time
+- GPU-accelerated raymarching is highly efficient
+- Physics can use low vertex count (32-64) while rendering is smooth
+
+**Performance Considerations**:
+- Keep soft body vertex count low (32-64 max)
+- Use early ray termination
+- Limit raymarch steps (64-128 typical)
+- Bounding volume culling
+- LOD via vertex count reduction at distance
 
 ---
 
@@ -480,11 +551,19 @@ Microbes render as **organic deformable metaballs** showing internal structure:
   test_engine.cpp         # Engine init tests
   test_game_constants.cpp # Constants validation
 
-  # New tests (to be added):
-  test_components.cpp     # FLECS component tests
+  # Physics tests:
+  test_soft_body.cpp      # Jolt soft body creation
+  test_icosphere.cpp      # Icosphere generation
+  test_constraints.cpp    # Distance/volume constraints
+
+  # Rendering tests:
+  test_sdf_shader.cpp     # SDF shader compilation
+  test_raymarch.cpp       # Raymarching logic
+
+  # System tests:
   test_physics_system.cpp # Jolt integration tests
   test_ecm_locomotion.cpp # EC&M algorithm tests
-  test_rendering.cpp      # Metaball shader tests
+  test_sdf_uniforms.cpp   # Bridge system tests
 ```
 
 **Testing Principles:**
@@ -501,7 +580,7 @@ Microbes render as **organic deformable metaballs** showing internal structure:
 
 **Test Naming Convention:**
 - `test_<module>_<function>_<scenario>`
-- Example: `test_transform_rotate_handlesZeroAngle`
+- Example: `test_icosphere_generate_hasCorrectVertexCount`
 
 ---
 

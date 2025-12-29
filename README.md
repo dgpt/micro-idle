@@ -80,21 +80,31 @@ Microbes exhibit **procedural, readable motion** tied to their biology:
 
 Motion communicates state and threat level rather than serving as pure spectacle.
 
-### **Physics: Soft-Body Simulation**
+### **Physics & Rendering: The Puppet Architecture**
 
-Microbes are physically simulated as **deformable soft bodies**:
-- Soft, squishy, gel-like collision behavior
-- Visible squishing and elastic deformation
-- Inter-microbe collisions feel tactile and organic
+Microbes use a novel **physics-driven rendering system**:
+
+**Physics Layer (Jolt Soft Bodies)**:
+- Low-resolution soft body simulation (32-64 vertices)
+- Deformable, gel-like collision behavior
+- Point cloud held together by distance and volume constraints
+- Multi-threaded CPU physics for realistic squishing
+
+**Rendering Layer (SDF Raymarching)**:
+- GPU-based Signed Distance Field (SDF) rendering
+- Smooth organic skin raymarched over physics point cloud
+- Real-time deformation reflects physics state
+- No mesh artifacts - pure procedural blobs
 
 **Amoeba Locomotion (EC&M Model)**:
 Amoebas use the **Excitable Cortex & Memory (EC&M)** algorithm for realistic movement:
 - 12-second behavioral cycle: extend → search → retract
+- Forces applied to specific soft body vertices
 - One thin pseudopod extends at a time
 - Lateral wiggle creates characteristic zig-zag motion
 - Biologically grounded force application
 
-This creates microbes that feel **alive and tactile** rather than rigid sprites.
+This creates microbes that feel **alive and tactile** with smooth, organic visuals.
 
 ---
 
