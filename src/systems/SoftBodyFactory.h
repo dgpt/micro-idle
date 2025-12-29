@@ -1,45 +1,66 @@
 #ifndef MICRO_IDLE_SOFTBODY_FACTORY_H
 #define MICRO_IDLE_SOFTBODY_FACTORY_H
 
-#include "src/components/Microbe.h"
-#include "src/systems/PhysicsSystem.h"
+#include <Jolt/Jolt.h>
+#include <Jolt/Physics/Body/BodyID.h>
 #include "raylib.h"
 
 namespace micro_idle {
 
-// Factory for creating soft body microbes
+struct PhysicsSystemState; // Forward declaration
+
+/**
+ * Factory for creating Jolt soft body entities
+ *
+ * Uses the Puppet architecture: single Jolt soft body for physics simulation,
+ * with vertex positions extracted for SDF raymarching rendering.
+ * Forces are applied directly to soft body vertices for EC&M locomotion.
+ */
 class SoftBodyFactory {
 public:
-    // Create an amoeba soft body (blob with deformable membrane)
-    static components::SoftBody createAmoeba(
+    /**
+     * Create an amoeba soft body using proper Jolt soft body physics
+     *
+     * @param physics The physics system
+     * @param position Center position
+     * @param radius Approximate radius
+     * @param subdivisions Icosphere subdivisions (0=12 verts, 1=42 verts, 2=162 verts)
+     * @return Jolt BodyID for the created soft body
+     */
+    static JPH::BodyID CreateAmoeba(
         PhysicsSystemState* physics,
-        Vector3 centerPosition,
+        Vector3 position,
         float radius,
-        int particleCount = 16
+        int subdivisions = 1
     );
 
-    // Create distance constraints between particles for soft body physics
-    static void createSpringConstraints(
+    /**
+     * Extract vertex positions from a soft body for SDF rendering
+     *
+     * @param physics The physics system
+     * @param bodyID The soft body BodyID
+     * @param outPositions Output array (must be pre-allocated)
+     * @param maxPositions Maximum number of positions to extract
+     * @return Number of vertices extracted
+     */
+    static int ExtractVertexPositions(
         PhysicsSystemState* physics,
-        components::SoftBody& softBody,
-        float stiffness = 0.8f,
-        float damping = 0.1f
+        JPH::BodyID bodyID,
+        Vector3* outPositions,
+        int maxPositions
     );
 
-    // Destroy soft body and all its constraints
-    static void destroySoftBody(
+    /**
+     * Get vertex count for a soft body
+     *
+     * @param physics The physics system
+     * @param bodyID The soft body BodyID
+     * @return Number of vertices in the soft body
+     */
+    static int GetVertexCount(
         PhysicsSystemState* physics,
-        components::SoftBody& softBody
+        JPH::BodyID bodyID
     );
-
-private:
-    // Helper: Create spherical particle distribution
-    static std::vector<Vector3> generateSpherePoints(int count, float radius);
-
-    // Helper: Generate icosphere mesh topology
-    static void generateIcosphere(int subdivisions, float radius,
-                                  std::vector<Vector3>& outVertices,
-                                  std::vector<int>& outTriangles);
 };
 
 } // namespace micro_idle

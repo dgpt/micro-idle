@@ -3,8 +3,7 @@
 
 #include "raylib.h"
 #include <Jolt/Jolt.h>
-#include <Jolt/Physics/Constraints/Constraint.h>
-#include <vector>
+#include <Jolt/Physics/Body/BodyID.h>
 
 namespace components {
 
@@ -34,7 +33,7 @@ enum class MicrobeType {
 // EC&M (Excitable Cortex & Memory) locomotion state
 struct ECMLocomotion {
     float phase;                // 0-1 cycle position in 12-second cycle
-    int targetParticleIndex;    // Which particle is extending as pseudopod
+    int targetVertexIndex;      // Which soft body vertex is extending as pseudopod
     Vector3 targetDirection;    // Direction of pseudopod extension
     float wigglePhase;          // For lateral wiggle motion
     bool isExtending;           // True during extension phase
@@ -51,28 +50,19 @@ struct MicrobeStats {
     float energy;
 };
 
-// Mesh topology for membrane
-struct MembraneMesh {
-    std::vector<int> triangleIndices;
-    int meshVertexStartIndex;
-    int meshVertexCount;
-};
-
-// Soft body structure - collection of connected particles
+// Soft body structure - single Jolt soft body (Puppet architecture)
 struct SoftBody {
-    std::vector<JPH::BodyID> particleBodyIDs;  // Jolt bodies for each particle
-    std::vector<Vector3> restPositions;         // Rest positions in local space
-    std::vector<JPH::Constraint*> constraints;  // Distance constraints between particles
-    int skeletonParticleCount;                  // Number of internal skeleton particles
-    MembraneMesh membrane;                      // Elastic mesh membrane
+    JPH::BodyID bodyID;         // Single Jolt soft body
+    int vertexCount;            // Number of vertices in soft body
+    int subdivisions;           // Icosphere subdivisions used
 };
 
 // Microbe entity - combines all microbe-specific components
 struct Microbe {
     MicrobeType type;
     MicrobeStats stats;
-    SoftBody softBody;
-    ECMLocomotion locomotion;
+    SoftBody softBody;          // Jolt soft body (physics simulation)
+    ECMLocomotion locomotion;   // EC&M behavior state
 };
 
 } // namespace components

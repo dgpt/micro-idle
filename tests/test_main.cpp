@@ -6,6 +6,11 @@ int test_rng_run(void);
 int test_engine_run(void);
 int test_game_constants_run(void);
 int test_visual_run(void);
+int test_icosphere_run(void);
+int test_constraints_run(void);
+int test_softbody_factory_run(void);
+int test_ecm_locomotion_run(void);
+int test_microbe_integration_run(void);
 
 int main(void) {
     test_set_env("MICRO_IDLE_ALLOW_SOFT", "1");
@@ -18,12 +23,20 @@ int main(void) {
     fails += test_engine_run();
     fails += test_game_constants_run();
 
+    // Physics tests
+    printf("\n--- Physics Tests ---\n");
+    fails += test_icosphere_run();
+    fails += test_constraints_run();
+
+    // Soft body tests (Puppet architecture)
+    printf("\n--- Soft Body Tests ---\n");
+    fails += test_softbody_factory_run();
+    fails += test_ecm_locomotion_run();
+    fails += test_microbe_integration_run();
+
     // Visual test (headless screenshot output)
     printf("\n--- Visual Tests (Headless) ---\n");
     fails += test_visual_run();
-
-    // TODO: Add Jolt physics tests in Phase 3
-    // TODO: Add EC&M locomotion tests in Phase 4
 
     if (fails != 0) {
         printf("\nFAIL %d test(s)\n", fails);

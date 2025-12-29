@@ -44,12 +44,23 @@ int main(void) {
         return 1;
     }
 
+    int prev_screen_w = GetRenderWidth();
+    int prev_screen_h = GetRenderHeight();
+
     while (!WindowShouldClose()) {
         float real_dt = GetFrameTime();
         (void)real_dt;
 
         int screen_w = GetRenderWidth();
         int screen_h = GetRenderHeight();
+
+        // Handle window resize - update game boundaries
+        if (screen_w != prev_screen_w || screen_h != prev_screen_h) {
+            game_handle_resize(game, screen_w, screen_h, camera);
+            prev_screen_w = screen_w;
+            prev_screen_h = screen_h;
+        }
+
         int steps = engine_time_update(&engine, real_dt);
         game_handle_input(game, camera, real_dt, screen_w, screen_h);
         for (int i = 0; i < steps; ++i) {

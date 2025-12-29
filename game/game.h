@@ -13,6 +13,7 @@ GameState *game_create(uint64_t seed);
 void game_destroy(GameState *game);
 bool game_init(GameState *game, uint64_t seed);
 void game_handle_input(GameState *game, Camera3D camera, float dt, int screen_w, int screen_h);
+void game_handle_resize(GameState *game, int screen_w, int screen_h, Camera3D camera);
 void game_update_fixed(GameState *game, float dt);
 void game_render(const GameState *game, Camera3D camera, float alpha);
 void game_render_ui(GameState *game, int screen_w, int screen_h);

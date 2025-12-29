@@ -13,6 +13,24 @@ struct GameState {
     uint64_t seed;
 };
 
+// Calculate world dimensions from camera view frustum
+static void calculateWorldDimensions(Camera3D camera, int screen_w, int screen_h, float* outWidth, float* outHeight) {
+    // Camera is at (0, 22, 0) looking down at XZ plane
+    // Use similar triangles to calculate visible area at y=0
+    float cameraHeight = camera.position.y;
+    float fovRadians = camera.fovy * DEG2RAD;
+    float aspect = (float)screen_w / (float)screen_h;
+
+    // Calculate visible height (Z dimension) at ground level
+    float visibleHeight = 2.0f * cameraHeight * tanf(fovRadians / 2.0f);
+
+    // Calculate visible width (X dimension) using aspect ratio
+    float visibleWidth = visibleHeight * aspect;
+
+    *outWidth = visibleWidth;
+    *outHeight = visibleHeight;
+}
+
 GameState* game_create(uint64_t seed) {
     printf("game: Initializing with FLECS+Jolt, seed=%lu\n", seed);
     fflush(stdout);
@@ -21,15 +39,26 @@ GameState* game_create(uint64_t seed) {
     state->seed = seed;
     state->world = new micro_idle::World();
 
-    // Create petri dish (flat disc with raised edges)
-    state->world->createPetriDish({0.0f, 0.0f, 0.0f}, 15.0f, 1.0f);
+    // Calculate initial world dimensions based on camera view
+    Camera3D camera = {0};
+    camera.position = (Vector3){0.0f, 22.0f, 0.0f};
+    camera.target = (Vector3){0.0f, 0.0f, 0.0f};
+    camera.fovy = 50.0f;
 
-    // Create amoebas on petri dish surface with EC&M locomotion
-    state->world->createAmoeba({0.0f, 2.0f, 0.0f}, 1.5f, RED);
-    state->world->createAmoeba({5.0f, 2.0f, 0.0f}, 1.2f, GREEN);
-    state->world->createAmoeba({-5.0f, 2.0f, 5.0f}, 1.3f, BLUE);
+    float worldWidth, worldHeight;
+    calculateWorldDimensions(camera, 1280, 720, &worldWidth, &worldHeight);
 
-    printf("game: Ready (3 amoebas on petri dish with EC&M locomotion)\n");
+    printf("game: Initial world dimensions: %.1f x %.1f\n", worldWidth, worldHeight);
+
+    // Create screen-space boundaries (rectangular container)
+    state->world->createScreenBoundaries(worldWidth, worldHeight);
+
+    // Create amoebas inside boundaries with EC&M locomotion
+    state->world->createAmoeba({0.0f, 1.5f, 0.0f}, 0.375f, RED);
+    state->world->createAmoeba({5.0f, 1.5f, 0.0f}, 0.3f, GREEN);
+    state->world->createAmoeba({-5.0f, 1.5f, 3.0f}, 0.325f, BLUE);
+
+    printf("game: Ready (3 amoebas with screen boundaries and EC&M locomotion)\n");
     fflush(stdout);
     return state;
 }
@@ -46,6 +75,17 @@ bool game_init(GameState* game, uint64_t seed) {
 
 void game_handle_input(GameState* game, Camera3D camera, float dt, int screen_w, int screen_h) {
     game->world->handleInput(camera, dt, screen_w, screen_h);
+}
+
+void game_handle_resize(GameState* game, int screen_w, int screen_h, Camera3D camera) {
+    // Recalculate world dimensions
+    float worldWidth, worldHeight;
+    calculateWorldDimensions(camera, screen_w, screen_h, &worldWidth, &worldHeight);
+
+    printf("game: Window resized - updating world dimensions to %.1f x %.1f\n", worldWidth, worldHeight);
+
+    // Update boundaries and reposition out-of-bounds amoebas
+    game->world->updateScreenBoundaries(worldWidth, worldHeight);
 }
 
 void game_update_fixed(GameState* game, float dt) {

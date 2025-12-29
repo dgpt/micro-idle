@@ -78,6 +78,8 @@ add_executable(game
     src/systems/PhysicsSystem.cpp
     src/systems/SoftBodyFactory.cpp
     src/systems/ECMLocomotionSystem.cpp
+    src/physics/Icosphere.cpp
+    src/physics/Constraints.cpp
 )
 
 target_include_directories(game PRIVATE
@@ -119,6 +121,11 @@ add_executable(tests
     tests/test_engine.cpp
     tests/test_game_constants.cpp
     tests/test_visual.cpp
+    tests/test_icosphere.cpp
+    tests/test_constraints.cpp
+    tests/test_softbody_factory.cpp
+    tests/test_ecm_locomotion.cpp
+    tests/test_microbe_integration.cpp
     engine/platform/engine.cpp
     engine/platform/time.cpp
     engine/util/rng.cpp
@@ -127,6 +134,8 @@ add_executable(tests
     src/systems/PhysicsSystem.cpp
     src/systems/SoftBodyFactory.cpp
     src/systems/ECMLocomotionSystem.cpp
+    src/physics/Icosphere.cpp
+    src/physics/Constraints.cpp
 )
 
 target_include_directories(tests PRIVATE

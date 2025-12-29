@@ -1,19 +1,29 @@
 #include "ECMLocomotionSystem.h"
 #include <cmath>
 #include <stdio.h>
+#include <cstdint>
+#include <Jolt/Physics/SoftBody/SoftBodyMotionProperties.h>
+#include <Jolt/Physics/Body/BodyLockInterface.h>
+#include <Jolt/Physics/Body/Body.h>
 
 namespace micro_idle {
 
+// Simple hash function to generate pseudo-random values from seed
+static float hashToFloat(float seed, int iteration) {
+    // Simple multiplicative hash
+    uint32_t hash = (uint32_t)(seed * 1000000.0f);
+    hash = hash * 2654435761u + (uint32_t)iteration;
+    hash = (hash ^ (hash >> 16)) * 0x85ebca6b;
+    hash = (hash ^ (hash >> 13)) * 0xc2b2ae35;
+    hash = hash ^ (hash >> 16);
+    return (float)(hash % 10000) / 10000.0f;
+}
+
 void ECMLocomotionSystem::initialize(components::ECMLocomotion& locomotion) {
-    // Start at random phase so amoebas don't all look the same initially
-    locomotion.phase = (float)rand() / RAND_MAX;
-    locomotion.targetParticleIndex = 0;
-
-    // Random initial direction
-    float angle = (float)rand() / RAND_MAX * 2.0f * PI;
-    locomotion.targetDirection = {cosf(angle), 0.0f, sinf(angle)};
-
-    locomotion.wigglePhase = (float)rand() / RAND_MAX * 2.0f * PI;
+    // NOTE: Initialization is now done in World.cpp using the microbe's unique seed
+    // This function is kept for compatibility but should not be called directly
+    // Each amoeba gets unique random values based on its seed field
+    locomotion.targetVertexIndex = 0;
 
     // Set phase flags based on initial phase
     locomotion.isExtending = (locomotion.phase < EXTEND_PHASE);
@@ -33,20 +43,19 @@ void ECMLocomotionSystem::update(
     if (loco.phase >= 1.0f) {
         loco.phase -= 1.0f;
 
-        // Choose new pseudopod target particle when cycle resets
-        int particleCount = (int)microbe.softBody.particleBodyIDs.size();
-        if (particleCount > 0) {
-            // Pick a membrane vertex
-            int membraneStart = microbe.softBody.membrane.meshVertexStartIndex;
-            int membraneCount = microbe.softBody.membrane.meshVertexCount;
-            if (membraneCount > 0) {
-                loco.targetParticleIndex = membraneStart + (rand() % membraneCount);
-            } else {
-                loco.targetParticleIndex = 0;
-            }
+        // Increment cycle counter for new random values
+        static int cycleCounter = 0;
+        cycleCounter++;
 
-            // Random direction in XZ plane (horizontal movement)
-            float angle = (float)rand() / RAND_MAX * 2.0f * PI;
+        // Choose new pseudopod target vertex when cycle resets
+        int vertexCount = microbe.softBody.vertexCount;
+        if (vertexCount > 0) {
+            // Pick a random vertex using microbe's unique seed
+            float vertexRand = hashToFloat(microbe.stats.seed, cycleCounter * 2);
+            loco.targetVertexIndex = (int)(vertexRand * vertexCount) % vertexCount;
+
+            // Random direction in XZ plane using microbe's unique seed
+            float angle = hashToFloat(microbe.stats.seed, cycleCounter * 2 + 1) * 2.0f * PI;
             loco.targetDirection = {cosf(angle), 0.0f, sinf(angle)};
         }
     }
@@ -58,11 +67,11 @@ void ECMLocomotionSystem::update(
 
     // Apply forces based on current phase
     if (loco.isExtending) {
-        applyExtensionForces(microbe, physics);
+        applyExtensionForces(microbe, physics, dt);
     } else if (loco.isSearching) {
-        applySearchForces(microbe, physics);
+        applySearchForces(microbe, physics, dt);
     } else if (loco.isRetracting) {
-        applyRetractionForces(microbe, physics);
+        applyRetractionForces(microbe, physics, dt);
     }
 
     // Update wiggle phase for lateral motion
@@ -71,38 +80,53 @@ void ECMLocomotionSystem::update(
 
 void ECMLocomotionSystem::applyExtensionForces(
     components::Microbe& microbe,
-    PhysicsSystemState* physics
+    PhysicsSystemState* physics,
+    float dt
 ) {
-    // Extend one thin pseudopod in target direction
-    if (microbe.softBody.particleBodyIDs.empty()) return;
+    // Extend one soft body vertex as pseudopod in target direction
+    int targetIdx = microbe.locomotion.targetVertexIndex;
+    if (targetIdx >= microbe.softBody.vertexCount) return;
 
-    int targetIdx = microbe.locomotion.targetParticleIndex;
-    if (targetIdx >= (int)microbe.softBody.particleBodyIDs.size()) return;
+    JPH::BodyID bodyID = microbe.softBody.bodyID;
+    if (bodyID.IsInvalid()) return;
 
-    JPH::BodyInterface& bodyInterface = physics->physicsSystem->GetBodyInterface();
-    JPH::BodyID bodyID = microbe.softBody.particleBodyIDs[targetIdx];
-
-    // Apply force in target direction
+    // Calculate velocity change in target direction (horizontal only)
     Vector3 dir = microbe.locomotion.targetDirection;
-    JPH::Vec3 force(dir.x * PSEUDOPOD_EXTENSION_FORCE,
-                    0.0f, // Don't apply vertical force
-                    dir.z * PSEUDOPOD_EXTENSION_FORCE);
+    float velocityMagnitude = PSEUDOPOD_EXTENSION_FORCE * dt; // Convert force to velocity impulse
+    JPH::Vec3 velocityDelta(
+        dir.x * velocityMagnitude,
+        0.0f, // No vertical velocity
+        dir.z * velocityMagnitude
+    );
 
-    bodyInterface.AddForce(bodyID, force);
+    // Directly modify vertex velocity
+    JPH::BodyLockWrite lock(physics->physicsSystem->GetBodyLockInterface(), bodyID);
+    if (lock.Succeeded()) {
+        JPH::Body& body = lock.GetBody();
+        JPH::SoftBodyMotionProperties* motionProps =
+            static_cast<JPH::SoftBodyMotionProperties*>(body.GetMotionProperties());
+
+        if (motionProps != nullptr) {
+            JPH::Array<JPH::SoftBodyVertex>& vertices = motionProps->GetVertices();
+            if (targetIdx < (int)vertices.size()) {
+                // Add velocity to the target vertex
+                vertices[targetIdx].mVelocity += velocityDelta;
+            }
+        }
+    }
 }
 
 void ECMLocomotionSystem::applySearchForces(
     components::Microbe& microbe,
-    PhysicsSystemState* physics
+    PhysicsSystemState* physics,
+    float dt
 ) {
-    // Apply lateral wiggle creating zig-zag motion
-    if (microbe.softBody.particleBodyIDs.empty()) return;
+    // Apply lateral wiggle to soft body vertex creating zig-zag motion
+    int targetIdx = microbe.locomotion.targetVertexIndex;
+    if (targetIdx >= microbe.softBody.vertexCount) return;
 
-    int targetIdx = microbe.locomotion.targetParticleIndex;
-    if (targetIdx >= (int)microbe.softBody.particleBodyIDs.size()) return;
-
-    JPH::BodyInterface& bodyInterface = physics->physicsSystem->GetBodyInterface();
-    JPH::BodyID bodyID = microbe.softBody.particleBodyIDs[targetIdx];
+    JPH::BodyID bodyID = microbe.softBody.bodyID;
+    if (bodyID.IsInvalid()) return;
 
     // Wiggle perpendicular to target direction
     Vector3 dir = microbe.locomotion.targetDirection;
@@ -111,62 +135,76 @@ void ECMLocomotionSystem::applySearchForces(
     // Perpendicular direction in XZ plane
     Vector3 perpDir = {-dir.z, 0.0f, dir.x};
 
-    JPH::Vec3 force(perpDir.x * WIGGLE_FORCE * wiggle,
-                    0.0f,
-                    perpDir.z * WIGGLE_FORCE * wiggle);
+    // Calculate lateral wiggle velocity
+    float velocityMagnitude = WIGGLE_FORCE * dt * wiggle;
+    JPH::Vec3 velocityDelta(
+        perpDir.x * velocityMagnitude,
+        0.0f,
+        perpDir.z * velocityMagnitude
+    );
 
-    bodyInterface.AddForce(bodyID, force);
+    // Directly modify vertex velocity
+    JPH::BodyLockWrite lock(physics->physicsSystem->GetBodyLockInterface(), bodyID);
+    if (lock.Succeeded()) {
+        JPH::Body& body = lock.GetBody();
+        JPH::SoftBodyMotionProperties* motionProps =
+            static_cast<JPH::SoftBodyMotionProperties*>(body.GetMotionProperties());
+
+        if (motionProps != nullptr) {
+            JPH::Array<JPH::SoftBodyVertex>& vertices = motionProps->GetVertices();
+            if (targetIdx < (int)vertices.size()) {
+                vertices[targetIdx].mVelocity += velocityDelta;
+            }
+        }
+    }
 }
 
 void ECMLocomotionSystem::applyRetractionForces(
     components::Microbe& microbe,
-    PhysicsSystemState* physics
+    PhysicsSystemState* physics,
+    float dt
 ) {
-    // Pull pseudopod back toward center
-    if (microbe.softBody.particleBodyIDs.empty()) return;
+    // Pull target vertex back toward soft body center
+    int targetIdx = microbe.locomotion.targetVertexIndex;
+    if (targetIdx >= microbe.softBody.vertexCount) return;
 
-    int targetIdx = microbe.locomotion.targetParticleIndex;
-    if (targetIdx >= (int)microbe.softBody.particleBodyIDs.size()) return;
+    JPH::BodyID bodyID = microbe.softBody.bodyID;
+    if (bodyID.IsInvalid()) return;
 
-    JPH::BodyInterface& bodyInterface = physics->physicsSystem->GetBodyInterface();
-    JPH::BodyID bodyID = microbe.softBody.particleBodyIDs[targetIdx];
+    JPH::BodyLockWrite lock(physics->physicsSystem->GetBodyLockInterface(), bodyID);
+    if (!lock.Succeeded()) return;
 
-    // Calculate center of mass
-    Vector3 center = {0, 0, 0};
-    int count = 0;
-    for (JPH::BodyID bid : microbe.softBody.particleBodyIDs) {
-        JPH::RVec3 pos = bodyInterface.GetPosition(bid);
-        center.x += (float)pos.GetX();
-        center.y += (float)pos.GetY();
-        center.z += (float)pos.GetZ();
-        count++;
-    }
-    if (count > 0) {
-        center.x /= count;
-        center.y /= count;
-        center.z /= count;
-    }
+    JPH::Body& body = lock.GetBody();
+    JPH::SoftBodyMotionProperties* motionProps =
+        static_cast<JPH::SoftBodyMotionProperties*>(body.GetMotionProperties());
 
-    // Direction from particle to center
-    JPH::RVec3 particlePos = bodyInterface.GetPosition(bodyID);
-    Vector3 toCenter = {
-        center.x - (float)particlePos.GetX(),
-        center.y - (float)particlePos.GetY(),
-        center.z - (float)particlePos.GetZ()
-    };
+    if (motionProps == nullptr) return;
 
-    // Normalize and apply retraction force
-    float length = sqrtf(toCenter.x*toCenter.x + toCenter.y*toCenter.y + toCenter.z*toCenter.z);
+    // Get soft body center of mass
+    JPH::Vec3 center = body.GetCenterOfMassPosition();
+
+    // Get target vertex position (in world space)
+    JPH::Array<JPH::SoftBodyVertex>& vertices = motionProps->GetVertices();
+    if (targetIdx >= (int)vertices.size()) return;
+
+    JPH::Vec3 localPos = vertices[targetIdx].mPosition;
+    JPH::RMat44 comTransform = JPH::RMat44::sRotationTranslation(body.GetRotation(), body.GetCenterOfMassPosition());
+    JPH::Vec3 worldPos = comTransform * localPos;
+
+    // Direction from vertex to center
+    JPH::Vec3 toCenter = center - worldPos;
+
+    // Normalize and calculate retraction velocity
+    float length = toCenter.Length();
     if (length > 0.001f) {
-        toCenter.x /= length;
-        toCenter.y /= length;
-        toCenter.z /= length;
+        toCenter /= length;
 
-        JPH::Vec3 force(toCenter.x * RETRACT_FORCE,
-                        toCenter.y * RETRACT_FORCE,
-                        toCenter.z * RETRACT_FORCE);
+        // Calculate velocity toward center (convert force to velocity impulse)
+        float velocityMagnitude = RETRACT_FORCE * dt;
+        JPH::Vec3 velocityDelta = toCenter * velocityMagnitude;
 
-        bodyInterface.AddForce(bodyID, force);
+        // Add velocity to vertex
+        vertices[targetIdx].mVelocity += velocityDelta;
     }
 }
 

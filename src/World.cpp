@@ -9,8 +9,22 @@
 #include "systems/ECMLocomotionSystem.h"
 #include "rlgl.h"
 #include <stdio.h>
+#include <cmath>
+#include <cstdint>
 
 namespace micro_idle {
+
+// Opaque struct to hold boundary BodyIDs without exposing Jolt headers in World.h
+struct WorldBoundaries {
+    JPH::BodyID north;
+    JPH::BodyID south;
+    JPH::BodyID east;
+    JPH::BodyID west;
+    JPH::BodyID floor;
+
+    WorldBoundaries() :
+        north(), south(), east(), west(), floor() {}
+};
 
 World::World() {
     printf("FLECS World: Initializing...\n");
@@ -18,6 +32,10 @@ World::World() {
 
     // Initialize Jolt physics
     physics = new PhysicsSystemState();
+
+    // Load SDF membrane shader
+    sdfMembraneShader = LoadShader("shaders/sdf_membrane.vert", "shaders/sdf_membrane.frag");
+    printf("Loaded SDF membrane shader (ID: %d)\n", sdfMembraneShader.id);
 
     // Register components and systems
     registerComponents();
@@ -27,12 +45,27 @@ World::World() {
     // Create singleton for input state
     world.set<components::InputState>({});
 
+    // Initialize boundaries
+    boundaries = new WorldBoundaries();
+
     printf("FLECS World: Ready\n");
     fflush(stdout);
 }
 
 World::~World() {
     printf("FLECS World: Shutting down\n");
+
+    // Clean up boundaries
+    if (boundaries) {
+        if (!boundaries->north.IsInvalid()) physics->destroyBody(boundaries->north);
+        if (!boundaries->south.IsInvalid()) physics->destroyBody(boundaries->south);
+        if (!boundaries->east.IsInvalid()) physics->destroyBody(boundaries->east);
+        if (!boundaries->west.IsInvalid()) physics->destroyBody(boundaries->west);
+        if (!boundaries->floor.IsInvalid()) physics->destroyBody(boundaries->floor);
+        delete boundaries;
+    }
+
+    UnloadShader(sdfMembraneShader);
     delete physics;
 }
 
@@ -110,25 +143,23 @@ void World::update(float dt) {
         }
     });
 
-    // Sync transforms for microbe soft bodies (calculate center of mass)
+    // Sync transforms for microbe soft bodies (calculate center from soft body position)
     world.each([this](flecs::entity e, components::Microbe& microbe, components::Transform& transform) {
-        if (!microbe.softBody.particleBodyIDs.empty()) {
+        if (!microbe.softBody.bodyID.IsInvalid()) {
             JPH::BodyInterface& bodyInterface = physics->physicsSystem->GetBodyInterface();
 
-            // Calculate center of mass from all particles
-            Vector3 center = {0, 0, 0};
-            for (JPH::BodyID bodyID : microbe.softBody.particleBodyIDs) {
-                JPH::RVec3 pos = bodyInterface.GetPosition(bodyID);
-                center.x += (float)pos.GetX();
-                center.y += (float)pos.GetY();
-                center.z += (float)pos.GetZ();
-            }
-            int count = (int)microbe.softBody.particleBodyIDs.size();
-            if (count > 0) {
-                transform.position.x = center.x / count;
-                transform.position.y = center.y / count;
-                transform.position.z = center.z / count;
-            }
+            // Get soft body center of mass
+            JPH::RVec3 pos = bodyInterface.GetCenterOfMassPosition(microbe.softBody.bodyID);
+            transform.position.x = (float)pos.GetX();
+            transform.position.y = (float)pos.GetY();
+            transform.position.z = (float)pos.GetZ();
+
+            // Get rotation (for future use)
+            JPH::Quat rot = bodyInterface.GetRotation(microbe.softBody.bodyID);
+            transform.rotation.x = rot.GetX();
+            transform.rotation.y = rot.GetY();
+            transform.rotation.z = rot.GetZ();
+            transform.rotation.w = rot.GetW();
         }
     });
 
@@ -148,36 +179,60 @@ void World::render(Camera3D camera, float alpha) {
         DrawSphere(transform.position, sphere.radius, color.color);
     });
 
-    // Render microbes as mesh surface
-    world.each([this](flecs::entity e, components::Microbe& microbe) {
-        if (microbe.softBody.membrane.meshVertexCount == 0) return;
+    // Render microbes using SDF raymarching (smooth membrane over soft body vertices)
+    world.each([this, camera](flecs::entity e, components::Microbe& microbe, components::Transform& transform) {
+        if (microbe.softBody.vertexCount == 0) return;
 
-        JPH::BodyInterface& bodyInterface = physics->physicsSystem->GetBodyInterface();
-        int meshStart = microbe.softBody.membrane.meshVertexStartIndex;
+        // Extract soft body vertex positions for rendering
+        Vector3 vertexPoints[64];
+        int count = SoftBodyFactory::ExtractVertexPositions(
+            physics,
+            microbe.softBody.bodyID,
+            vertexPoints,
+            64
+        );
 
-        // Draw mesh triangles
-        for (size_t i = 0; i + 2 < microbe.softBody.membrane.triangleIndices.size(); i += 3) {
-            int idx0 = meshStart + microbe.softBody.membrane.triangleIndices[i];
-            int idx1 = meshStart + microbe.softBody.membrane.triangleIndices[i + 1];
-            int idx2 = meshStart + microbe.softBody.membrane.triangleIndices[i + 2];
+        if (count == 0) return;
 
-            // Bounds check
-            if (idx0 >= (int)microbe.softBody.particleBodyIDs.size() ||
-                idx1 >= (int)microbe.softBody.particleBodyIDs.size() ||
-                idx2 >= (int)microbe.softBody.particleBodyIDs.size()) {
-                continue;
+        // Calculate bounding sphere for the microbe
+        Vector3 center = transform.position;
+        float boundRadius = microbe.stats.baseRadius * 2.5f; // Bounding radius for raymarch volume
+
+        // Begin shader mode
+        BeginShaderMode(sdfMembraneShader);
+
+        // Set shader uniforms
+        int viewPosLoc = GetShaderLocation(sdfMembraneShader, "viewPos");
+        int pointCountLoc = GetShaderLocation(sdfMembraneShader, "pointCount");
+        int baseRadiusLoc = GetShaderLocation(sdfMembraneShader, "baseRadius");
+        int colorLoc = GetShaderLocation(sdfMembraneShader, "microbeColor");
+
+        // Upload vertex points array
+        for (int i = 0; i < count && i < 64; i++) {
+            char uniformName[64];
+            snprintf(uniformName, sizeof(uniformName), "skeletonPoints[%d]", i);
+            int loc = GetShaderLocation(sdfMembraneShader, uniformName);
+            if (loc >= 0) {
+                float pos[3] = {vertexPoints[i].x, vertexPoints[i].y, vertexPoints[i].z};
+                SetShaderValue(sdfMembraneShader, loc, pos, SHADER_UNIFORM_VEC3);
             }
-
-            JPH::RVec3 p0 = bodyInterface.GetPosition(microbe.softBody.particleBodyIDs[idx0]);
-            JPH::RVec3 p1 = bodyInterface.GetPosition(microbe.softBody.particleBodyIDs[idx1]);
-            JPH::RVec3 p2 = bodyInterface.GetPosition(microbe.softBody.particleBodyIDs[idx2]);
-
-            Vector3 v0 = {(float)p0.GetX(), (float)p0.GetY(), (float)p0.GetZ()};
-            Vector3 v1 = {(float)p1.GetX(), (float)p1.GetY(), (float)p1.GetZ()};
-            Vector3 v2 = {(float)p2.GetX(), (float)p2.GetY(), (float)p2.GetZ()};
-
-            DrawTriangle3D(v0, v1, v2, microbe.stats.color);
         }
+
+        SetShaderValue(sdfMembraneShader, viewPosLoc, &camera.position, SHADER_UNIFORM_VEC3);
+        SetShaderValue(sdfMembraneShader, pointCountLoc, &count, SHADER_UNIFORM_INT);
+        SetShaderValue(sdfMembraneShader, baseRadiusLoc, &microbe.stats.baseRadius, SHADER_UNIFORM_FLOAT);
+
+        Vector3 colorVec = {
+            microbe.stats.color.r / 255.0f,
+            microbe.stats.color.g / 255.0f,
+            microbe.stats.color.b / 255.0f
+        };
+        SetShaderValue(sdfMembraneShader, colorLoc, &colorVec, SHADER_UNIFORM_VEC3);
+
+        // Draw bounding sphere (the shader will raymarch inside it)
+        DrawSphere(center, boundRadius, WHITE);
+
+        EndShaderMode();
     });
 
     EndMode3D();
@@ -234,20 +289,44 @@ flecs::entity World::createTestSphere(Vector3 position, float radius, Color colo
 flecs::entity World::createAmoeba(Vector3 position, float radius, Color color) {
     auto entity = world.entity();
 
-    // Create microbe component
+    // Create microbe component with unique seed
     components::Microbe microbe;
     microbe.type = components::MicrobeType::Amoeba;
-    microbe.stats.seed = (float)rand() / RAND_MAX;
+    microbe.stats.seed = (float)rand() / RAND_MAX;  // Unique seed for each amoeba
     microbe.stats.baseRadius = radius;
     microbe.stats.color = color;
     microbe.stats.health = 100.0f;
     microbe.stats.energy = 100.0f;
 
-    // Create soft body
-    microbe.softBody = SoftBodyFactory::createAmoeba(physics, position, radius, 16);
+    // Create Jolt soft body using Puppet architecture
+    int subdivisions = 1;  // 42 vertices (good balance for amoeba)
+    microbe.softBody.bodyID = SoftBodyFactory::CreateAmoeba(physics, position, radius, subdivisions);
+    microbe.softBody.vertexCount = SoftBodyFactory::GetVertexCount(physics, microbe.softBody.bodyID);
+    microbe.softBody.subdivisions = subdivisions;
 
-    // Initialize EC&M locomotion
-    ECMLocomotionSystem::initialize(microbe.locomotion);
+    printf("  Created soft body with %d vertices\n", microbe.softBody.vertexCount);
+
+    // Initialize EC&M locomotion with unique random values based on microbe's seed
+    auto hashFloat = [](float seed, int iter) -> float {
+        uint32_t hash = (uint32_t)(seed * 1000000.0f);
+        hash = hash * 2654435761u + (uint32_t)iter;
+        hash = (hash ^ (hash >> 16)) * 0x85ebca6b;
+        hash = (hash ^ (hash >> 13)) * 0xc2b2ae35;
+        hash = hash ^ (hash >> 16);
+        return (float)(hash % 10000) / 10000.0f;
+    };
+
+    microbe.locomotion.phase = hashFloat(microbe.stats.seed, 0);
+    microbe.locomotion.targetVertexIndex = 0;  // Target a soft body vertex
+    float angle = hashFloat(microbe.stats.seed, 1) * 2.0f * PI;
+    microbe.locomotion.targetDirection = {cosf(angle), 0.0f, sinf(angle)};
+    microbe.locomotion.wigglePhase = hashFloat(microbe.stats.seed, 2) * 2.0f * PI;
+
+    // Set phase flags
+    microbe.locomotion.isExtending = (microbe.locomotion.phase < ECMLocomotionSystem::EXTEND_PHASE);
+    microbe.locomotion.isSearching = (microbe.locomotion.phase >= ECMLocomotionSystem::EXTEND_PHASE &&
+                                      microbe.locomotion.phase < ECMLocomotionSystem::SEARCH_PHASE);
+    microbe.locomotion.isRetracting = (microbe.locomotion.phase >= ECMLocomotionSystem::SEARCH_PHASE);
 
     // Set transform to initial position
     entity.set<components::Transform>({
@@ -264,30 +343,103 @@ flecs::entity World::createAmoeba(Vector3 position, float radius, Color color) {
     return entity;
 }
 
-void World::createPetriDish(Vector3 position, float radius, float edgeHeight) {
-    printf("Creating petri dish (radius=%.1f, edge height=%.1f)\n", radius, edgeHeight);
+void World::createScreenBoundaries(float worldWidth, float worldHeight) {
+    printf("Creating screen boundaries (%.1f x %.1f)\n", worldWidth, worldHeight);
 
-    // Create flat circular disc (bottom of petri dish)
-    JPH::Vec3 discPos(position.x, position.y, position.z);
-    physics->createCylinder(discPos, radius, 0.2f, true); // Thin disc
+    float wallThickness = 1.0f;
+    float wallHeight = 5.0f;
 
-    // Create raised circular edge using multiple boxes arranged in a circle
-    int segmentCount = 32; // Number of segments for smooth circle
-    float segmentAngle = 2.0f * PI / segmentCount;
-    float segmentWidth = 2.0f * PI * radius / segmentCount; // Arc length
+    // Floor
+    JPH::Vec3 floorPos(0.0f, 0.0f, 0.0f);
+    JPH::Vec3 floorHalfExtents(worldWidth / 2.0f, 0.2f, worldHeight / 2.0f);
+    boundaries->floor = physics->createBox(floorPos, floorHalfExtents, true);
 
-    for (int i = 0; i < segmentCount; i++) {
-        float angle = i * segmentAngle;
-        float x = position.x + radius * cosf(angle);
-        float z = position.z + radius * sinf(angle);
-        float y = position.y + edgeHeight / 2.0f;
+    // North wall (+Z)
+    JPH::Vec3 northPos(0.0f, wallHeight / 2.0f, worldHeight / 2.0f);
+    JPH::Vec3 northHalfExtents(worldWidth / 2.0f, wallHeight / 2.0f, wallThickness / 2.0f);
+    boundaries->north = physics->createBox(northPos, northHalfExtents, true);
 
-        JPH::Vec3 segmentPos(x, y, z);
-        JPH::Vec3 halfExtents(segmentWidth / 2.0f, edgeHeight / 2.0f, 0.15f); // Thin wall
-        physics->createBox(segmentPos, halfExtents, true);
-    }
+    // South wall (-Z)
+    JPH::Vec3 southPos(0.0f, wallHeight / 2.0f, -worldHeight / 2.0f);
+    JPH::Vec3 southHalfExtents(worldWidth / 2.0f, wallHeight / 2.0f, wallThickness / 2.0f);
+    boundaries->south = physics->createBox(southPos, southHalfExtents, true);
 
-    printf("Petri dish created with %d edge segments\n", segmentCount);
+    // East wall (+X)
+    JPH::Vec3 eastPos(worldWidth / 2.0f, wallHeight / 2.0f, 0.0f);
+    JPH::Vec3 eastHalfExtents(wallThickness / 2.0f, wallHeight / 2.0f, worldHeight / 2.0f);
+    boundaries->east = physics->createBox(eastPos, eastHalfExtents, true);
+
+    // West wall (-X)
+    JPH::Vec3 westPos(-worldWidth / 2.0f, wallHeight / 2.0f, 0.0f);
+    JPH::Vec3 westHalfExtents(wallThickness / 2.0f, wallHeight / 2.0f, worldHeight / 2.0f);
+    boundaries->west = physics->createBox(westPos, westHalfExtents, true);
+
+    printf("Screen boundaries created\n");
+}
+
+void World::updateScreenBoundaries(float worldWidth, float worldHeight) {
+    printf("Updating screen boundaries to %.1f x %.1f\n", worldWidth, worldHeight);
+
+    // Destroy old boundaries
+    if (!boundaries->north.IsInvalid()) physics->destroyBody(boundaries->north);
+    if (!boundaries->south.IsInvalid()) physics->destroyBody(boundaries->south);
+    if (!boundaries->east.IsInvalid()) physics->destroyBody(boundaries->east);
+    if (!boundaries->west.IsInvalid()) physics->destroyBody(boundaries->west);
+    if (!boundaries->floor.IsInvalid()) physics->destroyBody(boundaries->floor);
+
+    // Create new boundaries with updated size
+    createScreenBoundaries(worldWidth, worldHeight);
+
+    // Reposition microbes that are now outside bounds
+    repositionMicrobesInBounds(worldWidth, worldHeight);
+}
+
+void World::repositionMicrobesInBounds(float worldWidth, float worldHeight) {
+    // Find all microbes and check if they're outside the new bounds
+    world.each([this, worldWidth, worldHeight](flecs::entity e, components::Microbe& microbe, components::Transform& transform) {
+        float halfWidth = worldWidth / 2.0f - 2.0f;  // Leave margin for microbe radius
+        float halfHeight = worldHeight / 2.0f - 2.0f;
+
+        bool needsReposition = false;
+        Vector3 newPos = transform.position;
+
+        // Check X bounds
+        if (transform.position.x > halfWidth || transform.position.x < -halfWidth) {
+            // Keep X position if within bounds, otherwise clamp to edge
+            newPos.x = fmaxf(-halfWidth, fminf(halfWidth, transform.position.x));
+            needsReposition = true;
+        }
+
+        // Check Z bounds
+        if (transform.position.z > halfHeight || transform.position.z < -halfHeight) {
+            // Keep Z position if within bounds, otherwise clamp to edge
+            newPos.z = fmaxf(-halfHeight, fminf(halfHeight, transform.position.z));
+            needsReposition = true;
+        }
+
+        if (needsReposition) {
+            // Drop from above like "falling from the heavens"
+            newPos.y = 25.0f;  // High above camera (camera is at y=22)
+
+            printf("Repositioning microbe - dropping from above to (%.1f, %.1f, %.1f)\n",
+                   newPos.x, newPos.y, newPos.z);
+
+            // Update transform
+            transform.position = newPos;
+
+            // Update soft body position in physics and reset velocity
+            if (!microbe.softBody.bodyID.IsInvalid()) {
+                JPH::BodyInterface& bodyInterface = physics->physicsSystem->GetBodyInterface();
+                bodyInterface.SetPosition(microbe.softBody.bodyID,
+                                         JPH::RVec3(newPos.x, newPos.y, newPos.z),
+                                         JPH::EActivation::Activate);
+
+                // Reset velocity so they fall cleanly
+                bodyInterface.SetLinearVelocity(microbe.softBody.bodyID, JPH::Vec3::sZero());
+                bodyInterface.SetAngularVelocity(microbe.softBody.bodyID, JPH::Vec3::sZero());
+            }
+        }
+    });
 }
 
 } // namespace micro_idle

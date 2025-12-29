@@ -10,6 +10,12 @@ namespace micro_idle {
 // Implements biologically-grounded amoeba movement as described in README.md
 class ECMLocomotionSystem {
 public:
+    // EC&M cycle constants (from README.md) - public for initialization
+    static constexpr float CYCLE_DURATION = 120.0f; // 12-second cycle
+    static constexpr float EXTEND_PHASE = 0.33f;   // 0.0 - 0.33
+    static constexpr float SEARCH_PHASE = 0.67f;   // 0.33 - 0.67
+    static constexpr float RETRACT_PHASE = 1.0f;   // 0.67 - 1.0
+
     // Update EC&M locomotion for one microbe
     static void update(
         components::Microbe& microbe,
@@ -21,11 +27,6 @@ public:
     static void initialize(components::ECMLocomotion& locomotion);
 
 private:
-    // EC&M cycle constants (from README.md)
-    static constexpr float CYCLE_DURATION = 12.0f; // 12-second cycle
-    static constexpr float EXTEND_PHASE = 0.33f;   // 0.0 - 0.33
-    static constexpr float SEARCH_PHASE = 0.67f;   // 0.33 - 0.67
-    static constexpr float RETRACT_PHASE = 1.0f;   // 0.67 - 1.0
 
     // Force magnitudes (10x increase for dramatic visible deformation)
     static constexpr float PSEUDOPOD_EXTENSION_FORCE = 150.0f;
@@ -35,17 +36,20 @@ private:
     // Apply forces based on current phase
     static void applyExtensionForces(
         components::Microbe& microbe,
-        PhysicsSystemState* physics
+        PhysicsSystemState* physics,
+        float dt
     );
 
     static void applySearchForces(
         components::Microbe& microbe,
-        PhysicsSystemState* physics
+        PhysicsSystemState* physics,
+        float dt
     );
 
     static void applyRetractionForces(
         components::Microbe& microbe,
-        PhysicsSystemState* physics
+        PhysicsSystemState* physics,
+        float dt
     );
 };
 
