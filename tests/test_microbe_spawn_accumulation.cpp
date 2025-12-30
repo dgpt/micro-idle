@@ -101,9 +101,9 @@ TEST_CASE("MicrobeSpawn - Check for physics body accumulation", "[microbe_spawn]
     int microbeCount = world.getWorld().count<components::Microbe>();
     printf("Microbe count after 2 seconds: %d\n", microbeCount);
 
-    // We started with 3 + should have spawned ~2 more = ~5 microbes
-    // If old ones are being destroyed, count would stay at 3 or less
-    REQUIRE(microbeCount >= 4);  // At least the original 3 plus 1 spawned
+    // We started with 0 microbes, should have spawned ~2 in 2 seconds at 1/sec
+    // If microbes are being destroyed, count would be less than expected
+    REQUIRE(microbeCount >= 2);  // At least 2 microbes should be spawned
 
     CloseWindow();
 }

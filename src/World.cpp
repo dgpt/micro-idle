@@ -187,7 +187,7 @@ void World::update(float dt) {
     spawnQueue.clear();
 }
 
-void World::render(Camera3D camera, float alpha) {
+void World::render(Camera3D camera, float alpha, bool renderToTexture) {
     // Update camera state singleton for rendering systems
     auto cameraState = world.get_mut<components::CameraState>();
     if (cameraState) {
@@ -234,8 +234,10 @@ void World::render(Camera3D camera, float alpha) {
         }
     }
 
-    // Begin 3D mode
-    BeginMode3D(camera);
+    // Begin 3D mode (skip if rendering to texture - matrices already set up)
+    if (!renderToTexture) {
+        BeginMode3D(camera);
+    }
 
     // Render simple spheres (petri dish components)
     world.each([](flecs::entity e,
@@ -278,6 +280,9 @@ void World::render(Camera3D camera, float alpha) {
         }
 
         // Render the microbe
+        printf("RENDERING MICROBE: position=(%.2f,%.2f,%.2f), radius=%.2f\n",
+               transform.position.x, transform.position.y, transform.position.z,
+               microbe.stats.baseRadius);
 
         Vector3 center = transform.position;
         float boundRadius = rendering::calculateBoundRadius(microbe.stats.baseRadius);
@@ -305,7 +310,10 @@ void World::render(Camera3D camera, float alpha) {
         EndShaderMode();
     });
 
-    EndMode3D();
+    // End 3D mode (skip if rendering to texture)
+    if (!renderToTexture) {
+        EndMode3D();
+    }
 }
 
 void World::handleInput(Camera3D camera, float dt, int screen_w, int screen_h) {

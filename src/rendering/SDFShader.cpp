@@ -6,12 +6,12 @@ namespace micro_idle {
 namespace rendering {
 
 Shader loadSDFMembraneShader() {
-    // Try primary path first
-    Shader shader = LoadShader("shaders/sdf_membrane.vert", "shaders/sdf_membrane.frag");
+    // Try paths relative to executable location
+    Shader shader = LoadShader("../shaders/sdf_membrane.vert", "../shaders/sdf_membrane.frag");
 
     if (shader.id == 0) {
-        // Try fallback path
-        shader = LoadShader("data/shaders/sdf_membrane.vert", "data/shaders/sdf_membrane.frag");
+        // Try absolute path from project root
+        shader = LoadShader("shaders/sdf_membrane.vert", "shaders/sdf_membrane.frag");
     }
 
     if (shader.id == 0) {

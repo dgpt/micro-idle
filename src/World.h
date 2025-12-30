@@ -27,7 +27,7 @@ public:
 
     // Core update methods
     void update(float dt);
-    void render(Camera3D camera, float alpha);
+    void render(Camera3D camera, float alpha, bool renderToTexture = false);
     void handleInput(Camera3D camera, float dt, int screen_w, int screen_h);
     void renderUI(int screen_w, int screen_h);
 

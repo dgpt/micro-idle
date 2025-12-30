@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+IMG="$1"
+
+if [[ ! -f "$IMG" ]]; then
+  echo "Error: file not found: $IMG" >&2
+  exit 1
+fi
+
+IMG_B64="$(base64 -w 0 "$IMG")"
+
+curl -s http://localhost:11434/api/generate \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"model\": \"ministral-3:14b\",
+    \"system\": \"You are viewing a screenshot from a video game.\",
+    \"prompt\": \"Precisely, concisely, and vividly describe what you see in this image. Include details e.g, shapes, colors, and the lighting effects. Keep your response concise.\",
+    \"stream\": false,
+    \"images\": [\"$IMG_B64\"]
+  }" | jq -r '.response'
+
