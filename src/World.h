@@ -2,12 +2,15 @@
 #define MICRO_IDLE_WORLD_H
 
 #include <flecs.h>
+#include <vector>
 #include "raylib.h"
+#include "SpawnRequest.h"
 
 namespace micro_idle {
 
-struct PhysicsSystemState; // Forward declaration
-struct WorldBoundaries;     // Forward declaration
+// Forward declarations
+struct PhysicsSystemState;
+struct WorldBoundaries;
 
 } // namespace micro_idle
 
@@ -36,6 +39,9 @@ public:
     void createScreenBoundaries(float worldWidth, float worldHeight);
     void updateScreenBoundaries(float worldWidth, float worldHeight);
     void repositionMicrobesInBounds(float worldWidth, float worldHeight);
+
+    // Spawn queue for deferred spawning (to avoid readonly issues during progress)
+    std::vector<SpawnRequest> spawnQueue;
 
     // Access to underlying FLECS world
     flecs::world& getWorld() { return world; }

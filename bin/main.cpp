@@ -2,6 +2,7 @@
 #include "raymath.h"
 #include "rlgl.h"
 #include <stdlib.h>
+#include <cstdio>
 
 #include "engine/platform/engine.h"
 #include "game/game.h"
@@ -73,6 +74,9 @@ int main(void) {
         game_render(game, camera, engine_time_alpha(&engine));
         game_render_ui(game, screen_w, screen_h);
         EndDrawing();
+
+        static int frameCount = 0;
+        frameCount++;
     }
 
     game_destroy(game);

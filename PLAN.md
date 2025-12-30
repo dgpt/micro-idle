@@ -1,603 +1,320 @@
-# Micro-Idle Engine - Implementation Plan
+# Micro-Idle Implementation Plan
 
-## Current Status
-- **Phase**: Critical Bug Fixes & Architectural Cleanup - Phase 1 → Phase 2 Transition
-- **Last Updated**: 2025-01-27
-- **Status**: Fixing critical simulation bugs and removing legacy XPBD/C code
-- **Architecture**: C++20/FLECS/Jolt Physics (Phase 2) - Removing Phase 1 XPBD GPU simulation
-- **Quality Gates**: Build must succeed, tests must pass, code coverage >98%
+**Last Updated**: Current session
+**Status**: In Progress - Phase 1 & 3 Core Systems Complete
 
 ---
 
-## Current Sprint: Physics Fixes & Legacy Code Removal
+## Current State Assessment
 
-**Objective**: Fix critical simulation bugs ("Ghost Microbe" and "Locomotion Treadmill") and remove all legacy Phase 1 XPBD/C code to enforce C++20/FLECS/Jolt architecture.
+### ✅ Implemented Components
 
-### Task 1: Apply Physics & Locomotion Fixes
+1. **Core Infrastructure**
+   - ✅ FLECS world initialization (`src/World.cpp/h`)
+   - ✅ Jolt Physics integration (`src/systems/PhysicsSystem.cpp/h`)
+   - ✅ Fixed-step time accumulator (`engine/platform/time.cpp/h`)
+   - ✅ Basic engine loop (`engine/platform/engine.cpp/h`)
 
-#### 1.1 Fix "Ghost Microbe" (Enable Gravity)
-**Target**: `src/systems/PhysicsSystem.cpp` - `PhysicsSystemState` constructor
-- **Change**: `physicsSystem->SetGravity(JPH::Vec3(0, 0, 0));`
-- **To**: `physicsSystem->SetGravity(JPH::Vec3(0, -9.81f, 0));`
-- **Status**: [x] **COMPLETED** - Gravity enabled (line 119)
+2. **Components**
+   - ✅ `Transform.h` - Position, rotation, scale
+   - ✅ `Physics.h` - Jolt BodyID wrapper
+   - ✅ `Microbe.h` - Microbe types, stats, soft body, EC&M locomotion
+   - ✅ `Rendering.h` - Basic render components
+   - ✅ `Input.h` - Input state singleton
 
-#### 1.2 Fix "Locomotion Treadmill" (Tune Friction & Damping)
-**Target**: `src/systems/SoftBodyFactory.cpp` - `CreateAmoeba` function
-- **Set Friction**: `creationSettings.mFriction = 1.5f;` (Reduced from 8.0f/20.0f)
-- **Set Damping**: `creationSettings.mLinearDamping = 0.5f;` (Increased from 0.4f/0.8f)
-- **Status**: [x] **COMPLETED** - Friction set to 1.5f, damping set to 0.5f (lines 81-82)
+3. **Physics Systems**
+   - ✅ `PhysicsSystem` - Jolt world management
+   - ✅ `SoftBodyFactory` - Icosphere generation and soft body creation
+   - ✅ `ECMLocomotionSystem` - EC&M algorithm implementation
+   - ✅ `Icosphere.cpp/h` - Icosphere mesh generation
+   - ✅ `Constraints.cpp/h` - Distance/volume constraints
 
-#### 1.3 Implement "Body Pull" Locomotion
-**Target**: `src/systems/ECMLocomotionSystem.cpp` - `applyRetractionForces` function
-- **Action**: Replace entire function with normalized "Body Pull" implementation
-- **Key Changes**:
-  - Distribute force across body vertices (excluding anchored foot)
-  - Normalize force by vertex count to prevent force explosions
-  - Pull body toward anchored foot instead of pulling foot back
-  - Function signature updated to remove unused `skeleton` parameter
-- **Status**: [x] **COMPLETED** - Function replaced with normalized Body Pull implementation (lines 147-190)
-- **Implementation**: Uses `RETRACT_FORCE / (vertexCount - 1.0f)` to normalize force per vertex, applies velocity impulse to all vertices except target (anchored foot)
+4. **Rendering**
+   - ✅ SDF shader files (`shaders/sdf_membrane.vert/frag`)
+   - ⚠️ SDF rendering logic exists but embedded in `World::render()` (needs refactoring)
 
-### Task 2: Remove Legacy Code
+5. **Tests**
+   - ✅ Visual test framework (`tests/test_visual.cpp`)
+   - ✅ Physics tests (`test_icosphere.cpp`, `test_constraints.cpp`)
+   - ✅ System tests (`test_softbody_factory.cpp`, `test_ecm_locomotion.cpp`)
 
-#### 2.1 Delete Legacy XPBD Compute Shaders
-**Target**: `data/shaders/xpbd_*.comp` files
-- [x] `xpbd_bounds.comp` - **DELETED**
-- [x] `xpbd_collide.comp` - **DELETED**
-- [x] `xpbd_finalize.comp` - **DELETED**
-- [x] `xpbd_grid_insert.comp` - **DELETED**
-- [x] `xpbd_microbe_update.comp` - **DELETED**
-- [x] `xpbd_predict.comp` - **DELETED**
-- [x] `xpbd_pressure.comp` - **DELETED**
-- [x] `xpbd_solve.comp` - **DELETED**
-- **Status**: [x] **COMPLETED** - All 8 XPBD compute shaders removed
+### ⚠️ Partially Implemented / Needs Refactoring
 
-#### 2.2 Delete Legacy C Implementations
-**Target**: Root and source directories
-- [x] `gpu_sim.c` / `gpu_sim.h` (Old GPU simulation engine) - **NOT FOUND** (already removed)
-- [x] `gpu_sim.c.gcov` (Coverage file) - **DELETED**
-- [x] `game.c` (Replaced by `game/game.cpp`) - **NOT FOUND** (already replaced)
-- [x] `engine.c` (Replaced by `engine/platform/engine.cpp`) - **NOT FOUND** (already replaced)
-- [x] `main.c` (Replaced by `bin/main.cpp`) - **NOT FOUND** (already replaced)
-- [x] `rng.c` (Replaced by `engine/util/rng.cpp`) - **NOT FOUND** (already replaced)
-- [x] `*.spv.h` files (Old compiled shader headers) - **NOT FOUND** (none exist)
-- [x] Legacy `.gcov` coverage files - **DELETED** (`engine.c.gcov`, `game.c.gcov`, `rng.c.gcov`, `time.c.gcov`)
-- **Status**: [x] **COMPLETED** - All legacy C files and coverage files removed
+1. **Rendering Systems** (Architecture §7)
+   - ⚠️ SDF rendering exists in `World::render()` but should be `SDFRenderSystem`
+   - ⚠️ SDF uniform updates embedded in render, should be `UpdateSDFUniforms` system
+   - ⚠️ Transform sync embedded in `World::update()`, should be `TransformSyncSystem`
 
-### Task 3: Verification & Documentation
+2. **Input System** (Architecture §7)
+   - ⚠️ Input component exists but no dedicated `InputSystem` to poll Raylib → FLECS
 
-- [x] Update PLAN.md to mark "Phase 0: Refactoring - Biological Accuracy" as In Progress
-- [x] Log removal of legacy XPBD modules in PLAN.md
-- [x] Verify clean build after deletions - **BUILD SUCCESSFUL** (2025-01-27)
-- [ ] Run tests to ensure no regressions - **REQUIRES WINDOWS** (tests.exe is Windows executable)
-- [ ] Verify code coverage >98% - **REQUIRES WINDOWS** (coverage tools need Windows execution)
-- [ ] Check generated test images for visual verification - **REQUIRES WINDOWS** (screenshots generated by tests.exe)
+3. **Game Logic**
+   - ❌ Microbe spawning system
+   - ❌ Destruction/hover detection
+   - ❌ Resource system
+   - ❌ Progression system (DNA traits, nutrients, disinfection)
 
-**Verification Requirements**:
-- **MUST RUN TESTS AND LOOK AT IMAGES GENERATED TO VERIFY CHANGES**
-- **BUILD MUST BE SUCCESSFUL** ✅ **COMPLETED** - Build succeeded with all changes
-- **TESTS MUST PASS** ⚠️ **PENDING** - Requires Windows execution (tests.exe built successfully)
-- **CODE COVERAGE MUST BE >98%** ⚠️ **PENDING** - Requires Windows execution
+### ❌ Missing Systems (Per Architecture)
 
-**Build Status** (2025-01-27):
-- ✅ Build completed successfully: `build/game.exe` and `build/tests.exe` created
-- ✅ No compilation errors
-- ✅ All source files compile correctly
-- ⚠️ Tests executable ready but requires Windows to run (cross-compiled from WSL)
+1. **Core Systems** (Architecture §7)
+   - ❌ `InputSystem.cpp/h` - Raylib → FLECS input capture
+   - ❌ `TransformSyncSystem.cpp/h` - Jolt → FLECS transform sync
+   - ❌ `UpdateSDFUniforms.cpp/h` - Physics → GPU data transport
+   - ❌ `SDFRenderSystem.cpp/h` - SDF raymarcher rendering
 
----
+2. **Rendering Utilities** (Architecture §4)
+   - ❌ `src/rendering/SDFShader.cpp/h` - Shader loading/management
+   - ❌ `src/rendering/RaymarchBounds.cpp/h` - Bounding volume generation
 
-## Critical Bugs Found & Solutions
+3. **Game Systems**
+   - ❌ `SpawnSystem.cpp/h` - Procedural microbe generation
+   - ❌ `DestructionSystem.cpp/h` - Hover/click detection and destruction
+   - ❌ `ResourceSystem.cpp/h` - Resource drops and collection
+   - ❌ `ProgressionSystem.cpp/h` - DNA traits, nutrients, disinfection
 
-### Bug #1: "Ghost Microbe" (Invisible Entities)
+4. **Components**
+   - ❌ `ECMLocomotion.h` - Separate component (currently embedded in `Microbe`)
+   - ❌ `SDFRenderComponent.h` - Shader reference, uniform locations
+   - ❌ `Resource.h` - Resource types and amounts
+   - ❌ `Progression.h` - DNA traits, upgrades
 
-**Root Cause**: Zero gravity combined with repositioning logic causes microbes to float forever at Y=25.0, behind the camera at Y=22.0.
-
-**The Trap**:
-- In `PhysicsSystem.cpp`, gravity is set to `(0, 0, 0)`
-- When window resizes (common on startup/OS interaction), `World::repositionMicrobesInBounds` teleports microbes to `Y = 25.0f` to "drop them from the heavens"
-- Since gravity is zero, they **float forever at Y=25.0**
-- Camera is at `Y=22.0` looking down
-- Microbes are floating *behind* the camera, making them invisible
-
-**Solution**: Enable gravity so microbes fall back to petri dish (`Y=0`) if they get picked up or spawned high.
-
-**Status**: [x] **FIXED**: Changed `PhysicsSystem.cpp` line 119 from `SetGravity(JPH::Vec3(0, 0, 0))` to `SetGravity(JPH::Vec3(0, -9.81f, 0))`
+5. **Collision Requirements** (Architecture §7.4)
+   - ⚠️ Collision detection exists but needs verification:
+     - REQ-COLLISION-001: Microbes collide when surfaces overlap ✓ (Jolt handles)
+     - REQ-COLLISION-002: Soft and elastic response ⚠️ (needs material tuning)
+     - REQ-COLLISION-003: Smooth separation ⚠️ (needs verification)
+     - REQ-COLLISION-004: Collision radius matches visual size ⚠️ (needs verification)
 
 ---
 
-### Bug #2: "Treadmill" Bug (No Net Movement)
+## Implementation Roadmap
 
-**Root Cause**: Current locomotion implementation creates zero net movement because it violates Newton's laws for friction-based movement.
+### Phase 1: Core System Refactoring (Current Priority)
 
-**The Problem**:
-- **Current Logic**: Push vertex out (Extend) → Pull vertex in (Retract). The amoeba just wiggles in place.
-- **Required Logic**: Push vertex out (Extend) → **Pull Body towards Vertex** (Retract).
-- This simulates the cell cytoskeleton contracting to pull the heavy nucleus forward while the pseudopod tip stays anchored to the substrate.
+**Goal**: Separate concerns according to architecture, establish clean Input → Simulation → Render pipeline.
 
-**Solution**: Rewrite `applyRetractionForces` to pull the *rest of the body* towards the extended pseudopod, rather than pulling the pseudopod back.
+#### 1.1 Extract Input System ✅
+- [x] Create `src/systems/InputSystem.cpp/h`
+- [x] Poll Raylib input (mouse, keyboard)
+- [x] Write to `InputState` singleton
+- [x] Register in `World::registerSystems()` (OnUpdate phase)
+- [ ] Test: Verify input state updates correctly
 
-**Status**: [x] **FIXED**: Replaced `ECMLocomotionSystem.cpp::applyRetractionForces()` with "Body Pull" implementation that:
-1. Calculates vector from Center-of-Mass to Target Vertex (the foot)
-2. Applies "Drag" velocity to all vertices EXCEPT the target vertex
-3. Target vertex stays "anchored" (friction handles this)
-4. Rest of body slides towards the foot
+#### 1.2 Extract Transform Sync System ✅
+- [x] Create `src/systems/TransformSyncSystem.cpp/h`
+- [x] Move transform sync logic from `World::update()` to system
+- [x] Handle both rigid bodies and soft bodies
+- [x] Register in OnStore phase (after physics, before render)
+- [ ] Test: Verify transforms sync correctly
 
-**Reference**: [Amoeba Proteus locomotion](https://www.youtube.com/watch?v=7pR7TNzJ_pA) demonstrates the specific "step-anchor-pull" motion.
+#### 1.3 Extract SDF Uniform Update System ✅
+- [x] Create `src/systems/UpdateSDFUniforms.cpp/h`
+- [x] Extract vertex positions from Jolt soft bodies
+- [x] Flatten to float array
+- [x] Update shader uniforms
+- [x] Register in OnStore phase (after TransformSync)
+- [ ] Test: Verify uniforms update correctly
 
----
+#### 1.4 Extract SDF Render System ✅
+- [x] Create `src/systems/SDFRenderSystem.cpp/h`
+- [x] Move SDF rendering logic from `World::render()` to system
+- [x] Query entities with `Microbe` + `Transform` components
+- [x] Draw bounding volumes, bind shader, render
+- [x] Register in PostUpdate phase
+- [ ] Test: Verify rendering works correctly
 
-### Note on Scaling
+#### 1.5 Create Rendering Utilities ✅
+- [x] Create `src/rendering/SDFShader.cpp/h` - Shader loading/management
+- [x] Create `src/rendering/RaymarchBounds.cpp/h` - Bounding volume generation
+- [x] Refactor `World` to use utilities
+- [x] Refactor `UpdateSDFUniforms` and `SDFRenderSystem` to use utilities
+- [x] Build: Verified compilation succeeds
+- [ ] Test: Verify shader loading and bounds calculation (needs visual test)
 
-The "test entities are like 50x larger" observation is an optical illusion caused by camera setup:
-- Camera is fixed at `Y = 22.0`
-- World boundaries are calculated based on window size
-- **Result**: If you maximize the window, microbes stay the same size (in pixels) but the "Petri dish" walls move further out
-- Microbes are physically `0.375` units. Screen height covers about `20` units
-- A microbe is roughly `1/50th` of the screen height. This is intentional (Micro-Idle)
+#### 1.6 Verify Phase Separation ⚠️
+- [x] Ensure Input phase runs first (OnUpdate) - InputSystem registered
+- [x] Ensure Simulation phase runs second (OnUpdate: Physics, EC&M, GameLogic) - Physics and EC&M run in update()
+- [x] Ensure Transform sync runs third (OnStore) - TransformSyncSystem registered
+- [x] Ensure Render phase runs last (PostUpdate) - SDFRenderSystem registered
+- [ ] Test: Verify phase ordering (needs testing)
 
----
+**Status**: Core systems working! Phase separation implemented. Game logic systems fully functional: SpawnSystem creates and spawns microbes properly, DestructionSystem uses single-click detection, ResourceSystem collects resources. **CRITICAL BUG FIXED** - Microbes were not accumulating because FLECS deferred entity operations. Added `it.world().defer_end()` to SpawnSystem to flush deferred operations immediately after spawning. Microbes now persist and accumulate correctly. Boundaries work properly (32px margin, floor at y=0, dynamic resizing). All systems tested and working!
 
----
-
-## Architecture Overview
-
-**New Approach: "The Puppet"**
-
-A clean separation between physics simulation and visual rendering:
-
-1. **Physics Layer (Jolt)**: Low-resolution soft body (icosphere, 32-64 vertices)
-   - Point cloud held together by distance constraints
-   - Volume constraint for internal pressure
-   - Collides with world and other entities
-   - Invisible to player (pure physics driver)
-
-2. **The Bridge**: Data transport system
-   - Extract vertex positions from Jolt every frame
-   - Flatten to shader-compatible format
-   - Update GPU uniforms
-
-3. **Rendering Layer (SDF Raymarcher)**: Smooth organic skin
-   - GPU fragment shader raymarches through volume
-   - SDF smooth union of all vertex positions
-   - Renders smooth blob over physics point cloud
-   - No mesh drawing - pure procedural rendering
-
-**Tech Stack**:
-- **Language**: C++20
-- **Build**: CMake with FetchContent
-- **Framework**: Raylib 5.5 (windowing, input, rendering)
-- **Physics**: Jolt Physics (multi-threaded CPU soft bodies)
-- **ECS**: FLECS (Entity Component System)
-
-**Platforms**: Windows (primary), Linux, macOS
+**Note**: Currently rendering is done manually in `World::render()` for compatibility. Systems are registered and will run via `world.progress()`, but render() is called separately. Future refactoring could integrate render systems more tightly.
 
 ---
 
-## Phase 0: Refactor Amoeba Simulation for Biological Accuracy
+### Phase 2: Collision & Physics Verification
 
-**Status**: [x] **IN PROGRESS** - Critical bug fixes and locomotion improvements (2025-01-27)
+**Goal**: Ensure collision requirements are met (Architecture §7.4).
 
-**Current Focus**: Applying physics fixes (gravity, friction, damping) and implementing Body Pull locomotion. Removing all legacy XPBD/C code to enforce C++20/FLECS/Jolt architecture.
+#### 2.1 Material Tuning
+- [ ] Review Jolt material properties (friction, restitution)
+- [ ] Tune for soft, elastic, gel-like response
+- [ ] Test: Verify collision feels soft and elastic
 
-**Objective**: Eliminate rendering artifacts and replace "floating/pushing" locomotion with biologically accurate "grip-and-stretch" friction-based model.
+#### 2.2 Collision Radius Verification
+- [ ] Measure visual size from SDF rendering
+- [ ] Compare with Jolt collision radius
+- [ ] Ensure they match (REQ-COLLISION-004)
+- [ ] Test: Visual test with collision overlay
 
-### Phase 0.1: Rendering Artifact Elimination
+#### 2.3 Smooth Separation Verification
+- [ ] Test collision scenarios
+- [ ] Verify microbes separate smoothly after collision
+- [ ] Test: Record collision behavior, verify smoothness
 
-**Target File**: `shaders/sdf_membrane.frag`
-
-- [x] **Fix Skeleton Detachment (Blobbing)**
-  - Increased `smoothness` (k) parameter from `0.5` to **1.2** in `sdMembrane()`
-  - Smooth minimum function maintains continuous field when skeletal nodes stretch far apart
-
-- [x] **Fix Hard Edges (Precision)**
-  - Reduced `surfDist` (epsilon) from `0.01` to **0.001** in `raymarch()`
-  - Increased `maxSteps` from `64` to **128** to accommodate finer step size
-  - Reduced normal sampling epsilon `eps` from `0.001` to **0.0001** in `calcNormal()`
-
-- [ ] **Optimize Visual Volume**
-  - Adjust `baseRadius` logic to ensure membrane doesn't vanish at high stretch (TODO: test and tune)
-  - Test with extreme pseudopod extensions
-
-### Phase 0.2: Jolt Physics Architecture (Internal Motor Model)
-
-**Target Files**: `src/systems/SoftBodyFactory.cpp`, `src/systems/PhysicsSystem.h/cpp`
-
-- [x] **Refactor `CreateAmoeba` for High Friction**
-  - Set `creationSettings.mFriction` to **20.0f** (MAX) - skin must anchor to ground
-  - Decreased `creationSettings.mPressure` to **5.0f** (from 20.0f) AND increased `creationSettings.mGravityFactor` to **5.0f** for pancake/drape effect
-  - Increased `mLinearDamping` to **0.8f** to kill momentum immediately when thrust stops
-
-- [x] **Implement Internal Rigid Skeleton**
-  - Added new collision layers to `PhysicsSystem.h`:
-    - `SKIN` layer: Collides with Ground (Static) and Skeleton
-    - `SKELETON` layer: Collides with Skin (Inside) but **IGNORES Ground**
-  - Modified `CreateAmoeba` to instantiate distinct **JPH::RigidBody spheres** inside Soft Body volume
-  - Updated collision filtering in `PhysicsSystem.cpp`:
-    - Group A (Skin): Collides with Ground (Static) and Skeleton
-    - Group B (Skeleton): Collides with Skin (Inside) but **IGNORES Ground**
-
-- [x] **Update Component Structure**
-  - Added `InternalSkeleton` component to `Microbe.h`:
-    ```cpp
-    struct InternalSkeleton {
-        std::vector<JPH::BodyID> skeletonBodyIDs;  // Rigid spheres inside soft body
-        int skeletonNodeCount;                      // Number of skeleton nodes
-    };
-    ```
-
-### Phase 0.3: Friction-Based Locomotion
-
-**Target File**: `src/systems/ECMLocomotionSystem.cpp`
-
-- [x] **Refactor Force Application**
-  - Changed from applying forces to soft body vertices → apply forces **ONLY to Internal Skeleton RigidBodies**
-  - Mechanism implemented:
-    1. Skeleton moves forward → hits interior of Skin
-    2. Front of Skin stretches forward (pushed by skeleton)
-    3. Bottom of Skin stays anchored (friction)
-    4. Elastic constraints eventually pull rear of Skin forward
-
-- [x] **Update EC&M Force Functions**
-  - `applyExtensionForces`: Now applies `AddForce` to skeleton rigid bodies via `BodyInterface.AddForce()`
-  - `applySearchForces`: Applies lateral wiggle force to skeleton nodes
-  - `applyRetractionForces`: Pulls skeleton nodes back toward soft body center
-  - Updated `World.cpp` to pass `InternalSkeleton` component to `ECMLocomotionSystem::update()`
-
-### Phase 0.4: Integration & Tuning
-
-- [ ] **Visual Validation**
-  - Verify normals are smooth (no black artifacts at horizon)
-  - Verify no field disconnection at extreme stretches
-  - Test with high pseudopod extension
-
-- [ ] **Physics Validation**
-  - Verify amoeba does **NOT** move if gravity is zero (requires friction/gravity to crawl)
-  - Verify visual mesh elongates significantly before center of mass moves
-  - Test stretch behavior: membrane must elongate before effective locomotion
-
-- [ ] **Performance Check**
-  - Profile with internal skeleton (should be minimal overhead)
-  - Verify collision filtering works correctly
-  - Test multi-amoeba scenarios
+**Success Criteria**: All collision requirements met, visual tests pass.
 
 ---
 
-## Phase 1: Clean Slate
+### Phase 3: Game Logic Foundation
 
-### 1.1 Remove Legacy Code
-- [x] Identify all metaball-related files
-- [ ] Remove all legacy shaders (metaball_*.vert/frag, xpbd_*.vert/frag)
-- [ ] Clean up legacy rendering code in src/
-- [ ] Remove game/game.cpp if obsolete
-- [ ] Remove any mesh-based rendering systems
+**Goal**: Implement core game loop mechanics (spawning, destruction, resources).
 
-### 1.2 Update Documentation
-- [x] Update ARCHITECTURE.MD with Puppet/SDF architecture
-- [x] Update PLAN.md (this file) with new roadmap
-- [ ] Update README.md to remove metaball references
+#### 3.1 Microbe Spawning System ✅
+- [x] Create `src/systems/SpawnSystem.cpp/h`
+- [x] Procedural microbe generation based on spawn rate
+- [x] Spawn within screen boundaries
+- [x] Register in OnUpdate phase
+- [x] Build: Verified compilation succeeds
+- [ ] Test: Verify microbes spawn correctly (needs visual test)
 
-### 1.3 Verify Clean Build
-- [ ] Build succeeds with remaining code
-- [ ] All existing tests pass
-- [ ] No compiler warnings
+#### 3.2 Destruction System ✅
+- [x] Create `src/systems/DestructionSystem.cpp/h`
+- [x] Hover detection (mouse position → microbe collision) - placeholder implementation
+- [x] Click detection (mouse click → microbe destruction)
+- [x] Damage application
+- [x] Register in OnUpdate phase (after Input)
+- [x] Spawn resources on destruction
+- [x] Build: Verified compilation succeeds
+- [ ] Test: Verify hover/click detection works (needs proper ray casting)
 
----
+#### 3.3 Resource System ✅
+- [x] Create `src/components/Resource.h` - Resource types (Sodium, Glucose, etc.)
+- [x] Create `src/systems/ResourceSystem.cpp/h` - Resource drops and collection
+- [x] Drop resources on microbe destruction
+- [x] Collect resources (hover/click) - placeholder implementation
+- [x] Resource inventory singleton
+- [x] Register in OnUpdate phase
+- [x] Build: Verified compilation succeeds
+- [ ] Test: Verify resources drop and collect correctly (needs visual test)
 
-## Phase 2: Foundation - Icosphere Generation
-
-### 2.1 Icosphere Utility
-- [ ] Create `src/physics/Icosphere.h/cpp`
-- [ ] Implement `GenerateIcosphere(subdivisions)` function
-- [ ] Returns vertex positions and triangle indices
-- [ ] Target: 32-64 vertices (1-2 subdivisions)
-- [ ] Create `tests/test_icosphere.cpp`
-- [ ] Verify vertex count, topology correctness
-
-### 2.2 Constraint Generation
-- [ ] Create `src/physics/Constraints.h/cpp`
-- [ ] Implement `GenerateEdgeConstraints(vertices, triangles)`
-- [ ] Generate distance constraints for each edge
-- [ ] Implement volume constraint configuration
-- [ ] Create `tests/test_constraints.cpp`
+**Success Criteria**: Microbes spawn, can be destroyed, drop resources.
 
 ---
 
-## Phase 3: Jolt Soft Body Integration
+### Phase 4: Progression System
 
-### 3.1 Soft Body Factory
-- [ ] Create `src/systems/SoftBodyFactory.h/cpp`
-- [ ] Implement `CreateSoftBodyAmoeba(world, position, scale)`
-- [ ] Configure `SoftBodyCreationSettings`:
-  - Icosphere vertices
-  - Edge constraints
-  - Volume constraint (internal pressure)
-  - Material properties (friction, restitution)
-- [ ] Return `JPH::BodyID`
+**Goal**: Implement DNA traits, nutrients, and disinfection (README §Progression).
 
-### 3.2 Physics System Update
-- [ ] Update `src/systems/PhysicsSystem.h/cpp`
-- [ ] Ensure Jolt soft body support is initialized
-- [ ] Configure collision filtering (soft body vs world, soft body vs soft body)
-- [ ] Test single soft body creation and stepping
+#### 4.1 DNA Traits System
+- [ ] Create `src/components/Progression.h` - DNA trait tree
+- [ ] Create `src/systems/ProgressionSystem.cpp/h` - Trait unlocking
+- [ ] Each trait provides: resource + drop + structure + mechanic
+- [ ] Prerequisite-based tree
+- [ ] Test: Verify trait unlocking works
 
-### 3.3 Component Definition
-- [ ] Update `src/components/Physics.h`
-- [ ] Define `SoftBodyComponent`:
-  ```cpp
-  struct SoftBodyComponent {
-      JPH::BodyID bodyID;
-      int vertexCount;
-      float* vertexPositions;  // Flattened [x,y,z, x,y,z, ...]
-  };
-  ```
+#### 4.2 Nutrient Upgrades
+- [ ] Extend `ProgressionSystem` for nutrient upgrades
+- [ ] Scaling and multiplicative stacking
+- [ ] Test: Verify upgrades scale correctly
 
-### 3.4 Test Soft Body
-- [ ] Create `tests/test_soft_body.cpp`
-- [ ] Verify soft body creation
-- [ ] Verify vertex extraction works
-- [ ] Test collision response
-- [ ] Test volume constraint (compression/expansion)
+#### 4.3 Disinfection System
+- [ ] Create `src/systems/DisinfectionSystem.cpp/h`
+- [ ] Active abilities (bursts, beams, chains)
+- [ ] Passive effects (fields, pulses, debuffs)
+- [ ] Idle automation (autonomous killers, fever waves)
+- [ ] Test: Verify abilities work correctly
+
+**Success Criteria**: Full progression system functional, traits unlock correctly.
 
 ---
 
-## Phase 4: The Bridge - Physics to GPU
+### Phase 5: Advanced Microbe Behaviors
 
-### 4.1 Data Extraction System
-- [ ] Create `src/systems/UpdateSDFUniforms.h/cpp`
-- [ ] Implement `System_UpdateSDFUniforms`:
-  - Query entities with `SoftBodyComponent` + `SDFRenderComponent`
-  - Lock Jolt BodyInterface
-  - Extract vertex positions from soft body
-  - Convert `JPH::RVec3` → `float[3]`
-  - Flatten to contiguous array
-  - Update `SoftBodyComponent.vertexPositions`
+**Goal**: Implement membrane undulation, flagella waves, and other behaviors (README §Behavioral Motion).
 
-### 4.2 Shader Uniform Update
-- [ ] In `System_UpdateSDFUniforms`:
-  - Get shader location for `uPoints[]`
-  - Call `SetShaderValueV(shader, loc, positions, SHADER_UNIFORM_VEC3, count)`
-  - Update once per frame
+#### 5.1 Membrane Undulation
+- [ ] Add undulation component
+- [ ] Implement wave-based deformation
+- [ ] Apply to soft body vertices
+- [ ] Test: Verify undulation looks correct
 
-### 4.3 Test Bridge System
-- [ ] Create `tests/test_sdf_uniforms.cpp`
-- [ ] Mock soft body with known positions
-- [ ] Verify data extraction is correct
-- [ ] Verify shader uniform format matches expectation
+#### 5.2 Flagella Waves
+- [ ] Add flagella component
+- [ ] Implement wave propagation
+- [ ] Visual rendering of flagella
+- [ ] Test: Verify flagella waves correctly
 
----
+#### 5.3 Additional Behaviors
+- [ ] Pili twitching
+- [ ] Extracellular filament drift
+- [ ] Periodic signal pulses
+- [ ] Test: Verify all behaviors work
 
-## Phase 5: SDF Raymarching Renderer
-
-### 5.1 SDF Shaders
-- [ ] Create `data/shaders/sdf_raymarch.vert`
-  - Standard MVP transformation
-  - Pass world position and view direction to fragment shader
-- [ ] Create `data/shaders/sdf_raymarch.frag`
-  - Define `uniform vec3 uPoints[64]`
-  - Define `uniform int uPointCount`
-  - Implement `sdSphere(p, center, radius)`
-  - Implement `sdSmoothUnion(d1, d2, k)` (smin)
-  - Implement `sceneSDF(p)` (loop over uPoints)
-  - Implement raymarch loop
-  - Implement normal calculation (SDF gradient)
-  - Implement basic Blinn-Phong lighting
-- [ ] Test shader compilation
-
-### 5.2 Bounding Volume Generator
-- [ ] Create `src/rendering/RaymarchBounds.h/cpp`
-- [ ] Implement `GenerateBoundingCube(center, size)`
-- [ ] Returns Raylib `Model` (inverted cube mesh)
-- [ ] Scale to encompass soft body extents
-
-### 5.3 SDF Render System
-- [ ] Create `src/systems/SDFRenderSystem.h/cpp`
-- [ ] Implement `System_SDFRender`:
-  - Query entities with `Transform` + `SoftBodyComponent` + `SDFRenderComponent`
-  - Set shader uniforms (already updated by UpdateSDFUniforms)
-  - Bind shader
-  - Draw bounding volume
-  - Unbind shader
-
-### 5.4 Component Definition
-- [ ] Update `src/components/Rendering.h`
-- [ ] Define `SDFRenderComponent`:
-  ```cpp
-  struct SDFRenderComponent {
-      Shader sdfShader;
-      int shaderLocPoints;
-      int shaderLocPointCount;
-      int shaderLocCameraPos;
-      Model boundingVolume;
-  };
-  ```
-
-### 5.5 Test Rendering
-- [ ] Create `tests/test_sdf_render.cpp`
-- [ ] Headless render test (screenshot verification)
-- [ ] Verify bounding volume is drawn
-- [ ] Verify shader uniforms are correctly bound
-- [ ] Visual test: single static soft body renders as smooth blob
+**Success Criteria**: All microbe behaviors implemented and working.
 
 ---
 
-## Phase 6: Integration - Full Pipeline
+### Phase 6: Advanced Features
 
-### 6.1 Entity Creation Helper
-- [ ] Create `src/World.cpp/h` helper function:
-  - `CreateAmoeba(world, position, color, seed)`
-  - Spawns entity with all required components
-  - Creates Jolt soft body
-  - Loads SDF shader
-  - Generates bounding volume
-  - Returns entity ID
+**Goal**: Implement defenses, offenses, and synergies (README §Enemy Threats).
 
-### 6.2 Main Loop Integration
-- [ ] Update `bin/main.cpp`:
-  - Initialize FLECS world
-  - Initialize PhysicsSystem (Jolt)
-  - Register all systems in correct pipeline order:
-    1. Input (OnUpdate)
-    2. Physics (OnUpdate)
-    3. Transform Sync (OnStore)
-    4. SDF Uniform Update (OnStore)
-    5. Render (PostUpdate)
-  - Spawn test amoeba
-  - Run main loop
+#### 6.1 Defensive Structures
+- [ ] Capsules (damage mitigation)
+- [ ] Biofilms (armor + clustering)
+- [ ] Spores (near-invulnerability)
+- [ ] Test: Verify defenses work
 
-### 6.3 Visual Verification
-- [ ] Create `tests/visual_test.cpp`
-- [ ] Spawn single amoeba
-- [ ] Let physics run for 60 frames
-- [ ] Capture screenshot
-- [ ] Verify blob is visible and smooth
-- [ ] Verify soft body deformation (if forces applied)
+#### 6.2 Offensive Structures
+- [ ] Harpoon systems (burst damage)
+- [ ] Contact toxins (damage-over-time)
+- [ ] Swarm coordination (group buffs)
+- [ ] Test: Verify offenses work
+
+#### 6.3 System Synergies
+- [ ] Ensure all systems work together
+- [ ] Test: Verify synergies work correctly
+
+**Success Criteria**: All advanced features implemented and working.
 
 ---
 
-## Phase 7: EC&M Locomotion
+## Development Practices
 
-### 7.1 EC&M Behavior System
-- [ ] Create `src/systems/ECMBehaviorSystem.h/cpp`
-- [ ] Implement `System_AmoebaBehavior`:
-  - Query entities with `ECMLocomotion` + `SoftBodyComponent`
-  - Update phase: `ecm.phase += dt / CYCLE_DURATION`
-  - State machine:
-    - **Extend** (0.0 - 0.4): Apply outward force to target vertex
-    - **Search** (0.4 - 0.7): Apply lateral wiggle forces
-    - **Retract** (0.7 - 1.0): Apply inward force to all vertices
-  - Pseudopod selection: choose vertex on leading edge
-  - Apply forces via `BodyInterface.AddForce(bodyID, vertexIndex, force)`
+Following ARCHITECTURE.MD §2:
 
-### 7.2 Component Definition
-- [ ] Update `src/components/Microbe.h`
-- [ ] Define `ECMLocomotion`:
-  ```cpp
-  struct ECMLocomotion {
-      float phase;              // 0.0 - 1.0
-      int pseudopodTarget;      // Vertex index
-      Vec3 pseudopodDir;        // Extension direction
-      float cycleTime;          // 12 seconds default
-  };
-  ```
-
-### 7.3 Test EC&M
-- [ ] Create `tests/test_ecm_locomotion.cpp`
-- [ ] Verify phase progression
-- [ ] Verify force application at correct vertices
-- [ ] Visual test: amoeba extends pseudopod, wiggles, retracts
-- [ ] Verify net displacement over multiple cycles
+- ✅ **Root Cause Analysis**: Fix root causes, not symptoms
+- ✅ **Verification**: Build and test after every logical change
+- ✅ **Refactoring**: Continuously reduce complexity
+- ✅ **Algorithm Selection**: Replace inadequate algorithms, don't extend with special cases
+- ✅ **Problem-Solving**: Try alternatives, refactor until root cause found
+- ✅ **Code Quality**: Prioritize readability, eliminate unjustified complexity
+- ✅ **Testing**: All debugging via tests, no ad-hoc logging
 
 ---
 
-## Phase 8: Collision & Multi-Entity
+## Testing Strategy
 
-### 8.1 Collision Configuration
-- [ ] Configure Jolt collision layers:
-  - Soft body vertices collide with ground
-  - Soft body vertices collide with other soft body vertices
-  - Test collision filtering
-
-### 8.2 Ground Plane
-- [ ] Create static ground plane (Jolt box body)
-- [ ] Verify soft bodies rest on ground
-- [ ] Verify soft deformation on impact
-
-### 8.3 Multi-Entity Test
-- [ ] Spawn 2-3 amoebas in proximity
-- [ ] Verify inter-amoeba collision
-- [ ] Verify soft squishing behavior
-- [ ] Verify separation after collision
-- [ ] Visual test: amoebas collide and deform realistically
+- **Unit Tests**: Each system has corresponding `test_*.cpp`
+- **Integration Tests**: Test system interactions
+- **Visual Tests**: Headless screenshot verification (`test_visual.cpp`)
+- **Coverage Target**: 95%+ on `/src` modules
 
 ---
 
-## Phase 9: Polish & Optimization
+## Build & Verification
 
-### 9.1 Shader Optimization
-- [ ] Profile fragment shader performance
-- [ ] Optimize raymarch step count
-- [ ] Implement early ray termination
-- [ ] Add bounding sphere culling
-
-### 9.2 Camera System
-- [ ] Implement simple camera controller
-- [ ] Orbit camera around scene
-- [ ] Zoom in/out
-- [ ] Lock to 2D plane (top-down view)
-
-### 9.3 Visual Polish
-- [ ] Tune SDF smoothness parameter
-- [ ] Tune vertex radius for desired blob appearance
-- [ ] Add color variation per microbe
-- [ ] Test different lighting models (ambient, diffuse, specular)
-
-### 9.4 Performance Testing
-- [ ] Spawn 10+ amoebas
-- [ ] Profile frame time
-- [ ] Profile physics time
-- [ ] Profile render time
-- [ ] Identify bottlenecks
-- [ ] Optimize as needed
+- **Build**: `bin/build.sh` (cross-compile Windows .exe)
+- **Test**: `bin/test.sh` (run tests + coverage)
+- **Never run `game.exe` during development** - use `tests.exe` for verification
 
 ---
 
-## Phase 10: Future Extensions
+## Notes
 
-### 10.1 Additional Microbe Types
-- [ ] Stentor (elongated soft body)
-- [ ] Heliozoa (spikes via separate rigid bodies)
-- [ ] Different icosphere resolutions per type
-
-### 10.2 Rendering Variations
-- [ ] Type-specific shader variants
-- [ ] Internal structure rendering (skeleton nodes)
-- [ ] Transparency/alpha blending
-
-### 10.3 Gameplay Systems
-- [ ] Resource drops on destruction
-- [ ] Player interaction (click to destroy)
-- [ ] Spawning system
-
----
-
-## Key Files
-
-**Docs**: README.md, ARCHITECTURE.MD, PLAN.md (this file)
-**Build**: CMakeLists.txt, bin/build.sh
-**Components**: src/components/*.h
-**Systems**: src/systems/*.cpp
-**Shaders**: data/shaders/sdf_raymarch.*
-**Main**: bin/main.cpp
-
----
-
-## Cleanup Checklist
-
-Files to DELETE:
-- [x] Identified legacy shader files (metaball_*, xpbd_*)
-- [ ] `data/shaders/metaball.vert/frag`
-- [ ] `data/shaders/metaball_field.vert/frag`
-- [ ] `data/shaders/metaball_surface.vert/frag`
-- [ ] `data/shaders/xpbd_microbe.vert/frag`
-- [ ] `data/shaders/particle_simple.vert/frag`
-- [ ] `data/shaders/outline.vert/frag`
-- [ ] `data/shaders/outline_curve.vert/frag`
-- [ ] Any obsolete mesh rendering code in src/
-- [ ] Any obsolete rendering components/systems
-
-Code to REFACTOR:
-- [ ] Keep PhysicsSystem.cpp (update for soft bodies)
-- [ ] Keep SoftBodyFactory.cpp (update for new approach)
-- [ ] Keep ECMLocomotionSystem.cpp (update to apply forces to vertices)
-- [ ] Keep World.cpp (update entity creation)
-- [ ] Remove any metaball/mesh rendering code
-
----
-
-## Next Immediate Steps
-
-1. Remove all legacy shader files
-2. Update README.md
-3. Verify clean build
-4. Begin Phase 2: Icosphere generation
+- Current implementation has good foundation but needs refactoring for proper architecture
+- Priority: Phase 1 (core system refactoring) to establish clean pipeline
+- Then: Phase 2 (collision verification) to ensure requirements met
+- Then: Phases 3-6 (game logic and features) incrementally

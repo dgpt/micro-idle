@@ -1,0 +1,5 @@
+if(EXISTS "/home/dgpt/code/games/micro-idle/build_native/tests-88df431_tests.cmake")
+  include("/home/dgpt/code/games/micro-idle/build_native/tests-88df431_tests.cmake")
+else()
+  add_test(tests_NOT_BUILT-88df431 tests_NOT_BUILT-88df431)
+endif()

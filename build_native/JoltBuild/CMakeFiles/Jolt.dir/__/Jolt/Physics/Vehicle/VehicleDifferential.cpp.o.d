@@ -1,0 +1,29 @@
+JoltBuild/CMakeFiles/Jolt.dir/__/Jolt/Physics/Vehicle/VehicleDifferential.cpp.o: \
+ /home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-src/Jolt/Physics/Vehicle/VehicleDifferential.cpp \
+ /usr/include/stdc-predef.h \
+ /home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-src/Build/../Jolt/Physics/Vehicle/VehicleDifferential.h \
+ /home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-src/Build/../Jolt/ObjectStream/SerializableObject.h \
+ /home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-src/Build/../Jolt/ObjectStream/ObjectStream.h \
+ /home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-src/Build/../Jolt/Core/Reference.h \
+ /home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-src/Build/../Jolt/Core/Atomics.h \
+ /usr/include/c++/13/atomic /usr/include/c++/13/bits/atomic_base.h \
+ /usr/include/x86_64-linux-gnu/c++/13/bits/c++config.h \
+ /usr/include/c++/13/new \
+ /usr/lib/gcc/x86_64-linux-gnu/13/include/stdint.h \
+ /usr/include/c++/13/bits/atomic_lockfree_defines.h \
+ /usr/include/c++/13/bits/move.h \
+ /home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-src/Build/../Jolt/Core/RTTI.h \
+ /home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-src/Build/../Jolt/ObjectStream/SerializableAttribute.h \
+ /home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-src/Build/../Jolt/ObjectStream/ObjectStreamTypes.h \
+ /home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-src/Build/../Jolt/Core/NonCopyable.h \
+ /home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-src/Build/../Jolt/Core/StreamIn.h \
+ /home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-src/Build/../Jolt/Core/StreamOut.h \
+ /home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-src/Build/../Jolt/ObjectStream/TypeDeclarations.h \
+ /home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-src/Build/../Jolt/Core/Color.h \
+ /home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-src/Build/../Jolt/Geometry/AABox.h \
+ /home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-src/Build/../Jolt/Geometry/Triangle.h \
+ /home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-src/Build/../Jolt/Geometry/IndexedTriangle.h \
+ /home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-src/Build/../Jolt/Geometry/Plane.h \
+ /home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-src/Build/../Jolt/ObjectStream/SerializableAttributeTyped.h \
+ /home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-src/Build/../Jolt/ObjectStream/GetPrimitiveTypeOfType.h \
+ /home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-src/Build/../Jolt/ObjectStream/SerializableAttributeEnum.h

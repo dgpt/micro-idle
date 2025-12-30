@@ -1,0 +1,179 @@
+INFO: Initializing raylib 5.5
+INFO: Platform backend: DESKTOP (GLFW)
+INFO: Supported raylib modules:
+INFO:     > rcore:..... loaded (mandatory)
+INFO:     > rlgl:...... loaded (mandatory)
+INFO:     > rshapes:... loaded (optional)
+INFO:     > rtextures:. loaded (optional)
+INFO:     > rtext:..... loaded (optional)
+INFO:     > rmodels:... loaded (optional)
+INFO:     > raudio:.... loaded (optional)
+INFO: DISPLAY: Trying to enable VSYNC
+INFO: DISPLAY: Device initialized successfully
+INFO:     > Display size: 3440 x 1440
+INFO:     > Screen size:  1280 x 720
+INFO:     > Render size:  1280 x 720
+INFO:     > Viewport offsets: 0, 0
+INFO: GLAD: OpenGL extensions loaded successfully
+INFO: GL: Supported extensions count: 403
+INFO: GL: OpenGL device information:
+INFO:     > Vendor:   NVIDIA Corporation
+INFO:     > Renderer: NVIDIA GeForce RTX 3090 Ti/PCIe/SSE2
+INFO:     > Version:  4.3.0 NVIDIA 581.80
+INFO:     > GLSL:     4.30 NVIDIA via Cg compiler
+INFO: GL: VAO extension detected, VAO functions loaded successfully
+INFO: GL: NPOT textures extension detected, full NPOT textures supported
+INFO: GL: DXT compressed textures supported
+INFO: GL: ETC2/EAC compressed textures supported
+INFO: GL: Compute shaders supported
+INFO: GL: Shader storage buffer objects supported
+INFO: PLATFORM: DESKTOP (GLFW - Win32): Initialized successfully
+INFO: TEXTURE: [ID 1] Texture loaded successfully (1x1 | R8G8B8A8 | 1 mipmaps)
+INFO: TEXTURE: [ID 1] Default texture loaded successfully
+INFO: SHADER: [ID 1] Vertex shader compiled successfully
+INFO: SHADER: [ID 2] Fragment shader compiled successfully
+INFO: SHADER: [ID 3] Program shader loaded successfully
+INFO: SHADER: [ID 3] Default shader loaded successfully
+INFO: RLGL: Render batch vertex buffers loaded successfully in RAM (CPU)
+INFO: RLGL: Render batch vertex buffers loaded successfully in VRAM (GPU)
+INFO: RLGL: Default OpenGL state initialized successfully
+INFO: TEXTURE: [ID 2] Texture loaded successfully (128x128 | GRAY_ALPHA | 1 mipmaps)
+INFO: FONT: Default font loaded successfully (224 glyphs)
+INFO: SYSTEM: Working Directory: \\wsl.localhost\Ubuntu\home\dgpt\code\games\micro-idle
+INFO: TIMER: Target time per frame: 16.667 milliseconds
+game: Initializing with FLECS+Jolt, seed=12648430
+FLECS World: Initializing...
+PhysicsSystem: Initializing Jolt Physics...
+PhysicsSystem: Jolt initialized (max bodies: 10240, threads: 16)
+FLECS World: Ready
+game: Initial world dimensions: 34.7 x 18.7
+Creating screen boundaries (34.7 x 18.7)
+Screen boundaries created: floor at y=0, walls at x=±17.3, z=±9.3
+SoftBodyFactory: Creating amoeba (subdivisions=1, radius=0.38)
+  Generated icosphere: 42 vertices, 80 triangles
+  Created constraints and optimized
+  Soft body created successfully (BodyID: 16777221)
+  Created skeleton node 0 (BodyID: 16777222)
+  Created skeleton node 1 (BodyID: 16777223)
+  Created skeleton node 2 (BodyID: 16777224)
+  Created 3 internal skeleton nodes
+  Created soft body with 42 vertices
+Created amoeba entity at (0.0, 1.5, 0.0)
+SoftBodyFactory: Creating amoeba (subdivisions=1, radius=0.30)
+  Generated icosphere: 42 vertices, 80 triangles
+  Created constraints and optimized
+  Soft body created successfully (BodyID: 16777225)
+  Created skeleton node 0 (BodyID: 16777226)
+  Created skeleton node 1 (BodyID: 16777227)
+  Created skeleton node 2 (BodyID: 16777228)
+  Created 3 internal skeleton nodes
+  Created soft body with 42 vertices
+Created amoeba entity at (5.0, 1.5, 0.0)
+SoftBodyFactory: Creating amoeba (subdivisions=1, radius=0.32)
+  Generated icosphere: 42 vertices, 80 triangles
+  Created constraints and optimized
+  Soft body created successfully (BodyID: 16777229)
+  Created skeleton node 0 (BodyID: 16777230)
+  Created skeleton node 1 (BodyID: 16777231)
+  Created skeleton node 2 (BodyID: 16777232)
+  Created 3 internal skeleton nodes
+  Created soft body with 42 vertices
+Created amoeba entity at (-5.0, 1.5, 3.0)
+game: Ready (3 amoebas with screen boundaries and EC&M locomotion)
+INFO: FILEIO: [shaders/sdf_membrane.vert] Text file loaded successfully
+INFO: FILEIO: [shaders/sdf_membrane.frag] Text file loaded successfully
+INFO: SHADER: [ID 4] Vertex shader compiled successfully
+INFO: SHADER: [ID 5] Fragment shader compiled successfully
+INFO: SHADER: [ID 6] Program shader loaded successfully
+SDFShader: Loaded shader successfully
+SoftBodyFactory: Creating amoeba (subdivisions=1, radius=1.93)
+  Generated icosphere: 42 vertices, 80 triangles
+  Created constraints and optimized
+  Soft body created successfully (BodyID: 16777233)
+  Created skeleton node 0 (BodyID: 16777234)
+  Created skeleton node 1 (BodyID: 16777235)
+  Created skeleton node 2 (BodyID: 16777236)
+  Created 3 internal skeleton nodes
+  Created soft body with 42 vertices
+Created amoeba entity at (14.0, 3.0, -2.5)
+SpawnSystem: Spawned microbe entity 557
+SoftBodyFactory: Creating amoeba (subdivisions=1, radius=1.89)
+  Generated icosphere: 42 vertices, 80 triangles
+  Created constraints and optimized
+  Soft body created successfully (BodyID: 16777237)
+  Created skeleton node 0 (BodyID: 16777238)
+  Created skeleton node 1 (BodyID: 16777239)
+  Created skeleton node 2 (BodyID: 16777240)
+  Created 3 internal skeleton nodes
+  Created soft body with 42 vertices
+Created amoeba entity at (-0.7, 3.0, 5.0)
+SpawnSystem: Spawned microbe entity 558
+SoftBodyFactory: Creating amoeba (subdivisions=1, radius=1.22)
+  Generated icosphere: 42 vertices, 80 triangles
+  Created constraints and optimized
+  Soft body created successfully (BodyID: 16777241)
+  Created skeleton node 0 (BodyID: 16777242)
+  Created skeleton node 1 (BodyID: 16777243)
+  Created skeleton node 2 (BodyID: 16777244)
+  Created 3 internal skeleton nodes
+  Created soft body with 42 vertices
+Created amoeba entity at (-13.6, 3.0, 3.5)
+SpawnSystem: Spawned microbe entity 559
+SoftBodyFactory: Creating amoeba (subdivisions=1, radius=1.68)
+  Generated icosphere: 42 vertices, 80 triangles
+  Created constraints and optimized
+  Soft body created successfully (BodyID: 16777245)
+  Created skeleton node 0 (BodyID: 16777246)
+  Created skeleton node 1 (BodyID: 16777247)
+  Created skeleton node 2 (BodyID: 16777248)
+  Created 3 internal skeleton nodes
+  Created soft body with 42 vertices
+Created amoeba entity at (1.1, 3.0, -1.6)
+SpawnSystem: Spawned microbe entity 560
+SoftBodyFactory: Creating amoeba (subdivisions=1, radius=1.45)
+  Generated icosphere: 42 vertices, 80 triangles
+  Created constraints and optimized
+  Soft body created successfully (BodyID: 16777249)
+  Created skeleton node 0 (BodyID: 16777250)
+  Created skeleton node 1 (BodyID: 16777251)
+  Created skeleton node 2 (BodyID: 16777252)
+  Created 3 internal skeleton nodes
+  Created soft body with 42 vertices
+Created amoeba entity at (4.6, 3.0, -4.8)
+SpawnSystem: Spawned microbe entity 561
+SoftBodyFactory: Creating amoeba (subdivisions=1, radius=1.12)
+  Generated icosphere: 42 vertices, 80 triangles
+  Created constraints and optimized
+  Soft body created successfully (BodyID: 16777253)
+  Created skeleton node 0 (BodyID: 16777254)
+  Created skeleton node 1 (BodyID: 16777255)
+  Created skeleton node 2 (BodyID: 16777256)
+  Created 3 internal skeleton nodes
+  Created soft body with 42 vertices
+Created amoeba entity at (10.2, 3.0, -2.6)
+SpawnSystem: Spawned microbe entity 562
+SoftBodyFactory: Creating amoeba (subdivisions=1, radius=1.35)
+  Generated icosphere: 42 vertices, 80 triangles
+  Created constraints and optimized
+  Soft body created successfully (BodyID: 16777257)
+  Created skeleton node 0 (BodyID: 16777258)
+  Created skeleton node 1 (BodyID: 16777259)
+  Created skeleton node 2 (BodyID: 16777260)
+  Created 3 internal skeleton nodes
+  Created soft body with 42 vertices
+Created amoeba entity at (-13.3, 3.0, 6.8)
+SpawnSystem: Spawned microbe entity 563
+SoftBodyFactory: Creating amoeba (subdivisions=1, radius=1.48)
+  Generated icosphere: 42 vertices, 80 triangles
+  Created constraints and optimized
+  Soft body created successfully (BodyID: 16777261)
+  Created skeleton node 0 (BodyID: 16777262)
+  Created skeleton node 1 (BodyID: 16777263)
+  Created skeleton node 2 (BodyID: 16777264)
+  Created 3 internal skeleton nodes
+  Created soft body with 42 vertices
+Created amoeba entity at (-0.4, 3.0, 4.6)
+SpawnSystem: Spawned microbe entity 564
+SoftBodyFactory: Creating amoeba (subdivisions=1, radius=1.83)
+  Generated icosphere: 42 vertices, 80 triangles
+  Created constraints 

@@ -1,0 +1,1 @@
+-I"/home/dgpt/code/games/micro-idle" -I"/home/dgpt/code/games/micro-idle/build_native/_deps/raylib-src/src" -I"/home/dgpt/code/games/micro-idle/build_native/_deps/raylib-src/src/external/glfw/include" -I"/home/dgpt/code/games/micro-idle/build_native/_deps/flecs-src/include" -I"/home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-src/Build/.."

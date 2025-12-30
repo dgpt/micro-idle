@@ -4,6 +4,7 @@
 #include "game/game.h"
 #include "src/World.h"
 #include "src/components/Transform.h"
+#include "src/components/WorldState.h"
 #include <stdio.h>
 #include <stdint.h>
 #include "raymath.h"
@@ -14,6 +15,7 @@ struct GameState {
 };
 
 // Calculate world dimensions from camera view frustum
+// Accounts for 32px margin from viewport edges
 static void calculateWorldDimensions(Camera3D camera, int screen_w, int screen_h, float* outWidth, float* outHeight) {
     // Camera is at (0, 22, 0) looking down at XZ plane
     // Use similar triangles to calculate visible area at y=0
@@ -27,8 +29,14 @@ static void calculateWorldDimensions(Camera3D camera, int screen_w, int screen_h
     // Calculate visible width (X dimension) using aspect ratio
     float visibleWidth = visibleHeight * aspect;
 
-    *outWidth = visibleWidth;
-    *outHeight = visibleHeight;
+    // Convert 32px margin to world space units
+    // At camera height, 1 pixel = visibleHeight / screen_h world units
+    float pixelToWorld = visibleHeight / (float)screen_h;
+    float marginWorld = 32.0f * pixelToWorld;
+
+    // Subtract margin from both dimensions (32px on each side = 64px total)
+    *outWidth = visibleWidth - (marginWorld * 2.0f);
+    *outHeight = visibleHeight - (marginWorld * 2.0f);
 }
 
 GameState* game_create(uint64_t seed) {
@@ -52,6 +60,13 @@ GameState* game_create(uint64_t seed) {
 
     // Create screen-space boundaries (rectangular container)
     state->world->createScreenBoundaries(worldWidth, worldHeight);
+
+    // Update world state singleton with initial screen dimensions
+    auto worldState = state->world->getWorld().get_mut<components::WorldState>();
+    if (worldState) {
+        worldState->screenWidth = 1280;
+        worldState->screenHeight = 720;
+    }
 
     // Create amoebas inside boundaries with EC&M locomotion
     state->world->createAmoeba({0.0f, 1.5f, 0.0f}, 0.375f, RED);
@@ -78,14 +93,22 @@ void game_handle_input(GameState* game, Camera3D camera, float dt, int screen_w,
 }
 
 void game_handle_resize(GameState* game, int screen_w, int screen_h, Camera3D camera) {
-    // Recalculate world dimensions
+    // Recalculate world dimensions (accounts for 32px margin)
     float worldWidth, worldHeight;
     calculateWorldDimensions(camera, screen_w, screen_h, &worldWidth, &worldHeight);
 
-    printf("game: Window resized - updating world dimensions to %.1f x %.1f\n", worldWidth, worldHeight);
+    printf("game: Window resized (%dx%d) - updating world dimensions to %.1f x %.1f\n",
+           screen_w, screen_h, worldWidth, worldHeight);
 
     // Update boundaries and reposition out-of-bounds amoebas
     game->world->updateScreenBoundaries(worldWidth, worldHeight);
+
+    // Update world state singleton with screen dimensions
+    auto worldState = game->world->getWorld().get_mut<components::WorldState>();
+    if (worldState) {
+        worldState->screenWidth = screen_w;
+        worldState->screenHeight = screen_h;
+    }
 }
 
 void game_update_fixed(GameState* game, float dt) {

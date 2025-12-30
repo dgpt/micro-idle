@@ -1,4 +1,11 @@
 cmake_minimum_required(VERSION 3.15)
+
+# Force Windows cross-compilation from WSL
+set(CMAKE_SYSTEM_NAME Windows)
+set(CMAKE_C_COMPILER x86_64-w64-mingw32-gcc)
+set(CMAKE_CXX_COMPILER x86_64-w64-mingw32-g++)
+set(CMAKE_RC_COMPILER x86_64-w64-mingw32-windres)
+
 project(micro_idle C CXX)
 
 option(DEV "Enable dev mode" ON)
@@ -24,9 +31,9 @@ else()
         add_subdirectory(third_party/raylib)
     else()
         include(FetchContent)
-        # Enable Wayland/EGL for zink compatibility (WSL2)
-        set(GLFW_BUILD_WAYLAND ON CACHE BOOL "" FORCE)
-        set(GLFW_BUILD_X11 OFF CACHE BOOL "" FORCE)
+        # Windows cross-compilation settings
+        set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(BUILD_GAMES OFF CACHE BOOL "" FORCE)
         FetchContent_Declare(raylib
             GIT_REPOSITORY https://github.com/raysan5/raylib.git
             GIT_TAG 5.5
@@ -86,11 +93,21 @@ add_executable(game
     engine/util/rng.cpp
     game/game.cpp
     src/World.cpp
+    src/math/Random.cpp
     src/systems/PhysicsSystem.cpp
     src/systems/SoftBodyFactory.cpp
     src/systems/ECMLocomotionSystem.cpp
+    src/systems/InputSystem.cpp
+    src/systems/TransformSyncSystem.cpp
+    src/systems/UpdateSDFUniforms.cpp
+    src/systems/SDFRenderSystem.cpp
+    src/systems/SpawnSystem.cpp
+    src/systems/DestructionSystem.cpp
+    src/systems/ResourceSystem.cpp
     src/physics/Icosphere.cpp
     src/physics/Constraints.cpp
+    src/rendering/SDFShader.cpp
+    src/rendering/RaymarchBounds.cpp
 )
 
 target_include_directories(game PRIVATE
@@ -103,7 +120,7 @@ target_link_libraries(game PRIVATE
     Jolt
 )
 
-# Static link MinGW runtime (no DLL dependencies) - always for Windows cross-compilation
+# Static link MinGW runtime (no DLL dependencies) - Windows cross-compilation
 target_link_options(game PRIVATE -static-libgcc -static-libstdc++ -static)
 
 target_compile_definitions(game PRIVATE
@@ -131,6 +148,11 @@ set(TEST_SOURCES
     tests/test_game_constants.cpp
     tests/test_visual.cpp
     tests/test_game_render.cpp
+    tests/test_rendering_debug.cpp
+    tests/test_microbe_spawn_accumulation.cpp
+    tests/test_microbe_persistence.cpp
+    tests/test_spawn_positions.cpp
+    tests/test_microbe_position_persistence.cpp
     tests/test_icosphere.cpp
     tests/test_constraints.cpp
     tests/test_softbody_factory.cpp
@@ -141,11 +163,21 @@ set(TEST_SOURCES
     engine/util/rng.cpp
     game/game.cpp
     src/World.cpp
+    src/math/Random.cpp
     src/systems/PhysicsSystem.cpp
     src/systems/SoftBodyFactory.cpp
     src/systems/ECMLocomotionSystem.cpp
+    src/systems/InputSystem.cpp
+    src/systems/TransformSyncSystem.cpp
+    src/systems/UpdateSDFUniforms.cpp
+    src/systems/SDFRenderSystem.cpp
+    src/systems/SpawnSystem.cpp
+    src/systems/DestructionSystem.cpp
+    src/systems/ResourceSystem.cpp
     src/physics/Icosphere.cpp
     src/physics/Constraints.cpp
+    src/rendering/SDFShader.cpp
+    src/rendering/RaymarchBounds.cpp
 )
 
 # Create test executable with Catch2
@@ -162,7 +194,7 @@ target_link_libraries(tests PRIVATE
     Catch2::Catch2WithMain
 )
 
-# Static link MinGW runtime and set console subsystem - always for Windows cross-compilation
+# Static link MinGW runtime and set console subsystem - Windows cross-compilation
 target_link_options(tests PRIVATE -static-libgcc -static-libstdc++ -static -Wl,-subsystem,console)
 
 target_compile_definitions(tests PRIVATE GRAPHICS_API_OPENGL_46)

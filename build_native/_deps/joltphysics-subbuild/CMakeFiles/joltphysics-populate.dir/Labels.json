@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-subbuild/CMakeFiles/joltphysics-populate"
+		},
+		{
+			"file" : "/home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-subbuild/CMakeFiles/joltphysics-populate.rule"
+		},
+		{
+			"file" : "/home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-subbuild/CMakeFiles/joltphysics-populate-complete.rule"
+		},
+		{
+			"file" : "/home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-subbuild/joltphysics-populate-prefix/src/joltphysics-populate-stamp/joltphysics-populate-build.rule"
+		},
+		{
+			"file" : "/home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-subbuild/joltphysics-populate-prefix/src/joltphysics-populate-stamp/joltphysics-populate-configure.rule"
+		},
+		{
+			"file" : "/home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-subbuild/joltphysics-populate-prefix/src/joltphysics-populate-stamp/joltphysics-populate-download.rule"
+		},
+		{
+			"file" : "/home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-subbuild/joltphysics-populate-prefix/src/joltphysics-populate-stamp/joltphysics-populate-install.rule"
+		},
+		{
+			"file" : "/home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-subbuild/joltphysics-populate-prefix/src/joltphysics-populate-stamp/joltphysics-populate-mkdir.rule"
+		},
+		{
+			"file" : "/home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-subbuild/joltphysics-populate-prefix/src/joltphysics-populate-stamp/joltphysics-populate-patch.rule"
+		},
+		{
+			"file" : "/home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-subbuild/joltphysics-populate-prefix/src/joltphysics-populate-stamp/joltphysics-populate-test.rule"
+		},
+		{
+			"file" : "/home/dgpt/code/games/micro-idle/build_native/_deps/joltphysics-subbuild/joltphysics-populate-prefix/src/joltphysics-populate-stamp/joltphysics-populate-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"joltphysics-populate"
+		],
+		"name" : "joltphysics-populate"
+	}
+}

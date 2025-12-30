@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/home/dgpt/code/games/micro-idle/build_native/_deps/flecs-subbuild/CMakeFiles/flecs-populate"
+		},
+		{
+			"file" : "/home/dgpt/code/games/micro-idle/build_native/_deps/flecs-subbuild/CMakeFiles/flecs-populate.rule"
+		},
+		{
+			"file" : "/home/dgpt/code/games/micro-idle/build_native/_deps/flecs-subbuild/CMakeFiles/flecs-populate-complete.rule"
+		},
+		{
+			"file" : "/home/dgpt/code/games/micro-idle/build_native/_deps/flecs-subbuild/flecs-populate-prefix/src/flecs-populate-stamp/flecs-populate-build.rule"
+		},
+		{
+			"file" : "/home/dgpt/code/games/micro-idle/build_native/_deps/flecs-subbuild/flecs-populate-prefix/src/flecs-populate-stamp/flecs-populate-configure.rule"
+		},
+		{
+			"file" : "/home/dgpt/code/games/micro-idle/build_native/_deps/flecs-subbuild/flecs-populate-prefix/src/flecs-populate-stamp/flecs-populate-download.rule"
+		},
+		{
+			"file" : "/home/dgpt/code/games/micro-idle/build_native/_deps/flecs-subbuild/flecs-populate-prefix/src/flecs-populate-stamp/flecs-populate-install.rule"
+		},
+		{
+			"file" : "/home/dgpt/code/games/micro-idle/build_native/_deps/flecs-subbuild/flecs-populate-prefix/src/flecs-populate-stamp/flecs-populate-mkdir.rule"
+		},
+		{
+			"file" : "/home/dgpt/code/games/micro-idle/build_native/_deps/flecs-subbuild/flecs-populate-prefix/src/flecs-populate-stamp/flecs-populate-patch.rule"
+		},
+		{
+			"file" : "/home/dgpt/code/games/micro-idle/build_native/_deps/flecs-subbuild/flecs-populate-prefix/src/flecs-populate-stamp/flecs-populate-test.rule"
+		},
+		{
+			"file" : "/home/dgpt/code/games/micro-idle/build_native/_deps/flecs-subbuild/flecs-populate-prefix/src/flecs-populate-stamp/flecs-populate-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"flecs-populate"
+		],
+		"name" : "flecs-populate"
+	}
+}
