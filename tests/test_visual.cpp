@@ -2,32 +2,28 @@
 #include <cstdlib>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include "raylib.h"
-#include "rlgl.h"
-#include "game/game.h"
-#include "engine/platform/engine.h"
 
 #ifdef _WIN32
 #include <direct.h>
 #define mkdir(path, mode) _mkdir(path)
+#else
+#include <unistd.h>
 #endif
 
-// Delete all PNG files in screenshots directory
-static void clearScreenshots() {
-#ifdef _WIN32
-    system("del /Q screenshots\\*.png 2>nul");
-#else
-    system("rm -f screenshots/*.png 2>/dev/null");
-#endif
-}
+#include "raylib.h"
+#include "rlgl.h"
+#include "src/World.h"
+#include "src/components/Microbe.h"
+#include "engine/platform/engine.h"
+
+using namespace micro_idle;
 
 // Headless visual test - runs actual game code with screenshot output
 int test_visual_run(void) {
     printf("\n=== Visual Test (Headless Game Run) ===\n");
 
-    // Create screenshots directory
+    // Create screenshots directory (should already exist from test_main, but ensure it)
     mkdir("screenshots", 0755);
-    clearScreenshots();
 
     // Initialize window in hidden mode
     SetConfigFlags(FLAG_WINDOW_HIDDEN);
@@ -58,16 +54,13 @@ int test_visual_run(void) {
     camera.fovy = 50.0f;
     camera.projection = CAMERA_PERSPECTIVE;
 
-    // Create game state (actual game code)
-    GameState *game = game_create(0xC0FFEEu);
-    if (!game) {
-        printf("✗ Failed to create game state\n");
-        UnloadRenderTexture(target);
-        CloseWindow();
-        return 1;
-    }
+    // Create World (FLECS + Jolt system)
+    World world;
 
-    printf("Running headless game simulation (5 seconds, 3 screenshots/sec)...\n");
+    // Create test amoebas
+    world.createAmoeba((Vector3){0.0f, 5.0f, 0.0f}, 2.0f, RED);
+    world.createAmoeba((Vector3){5.0f, 5.0f, 0.0f}, 1.5f, BLUE);
+    world.createAmoeba((Vector3){-5.0f, 5.0f, 0.0f}, 1.8f, GREEN);
 
     const int totalFrames = 60 * 5; // 5 seconds at 60 FPS
     const int screenshotInterval = 20; // Every 20 frames = 3 per second
@@ -77,17 +70,21 @@ int test_visual_run(void) {
         // Run game update (actual game code)
         float dt = 1.0f / 60.0f;
         int steps = engine_time_update(&engine, dt);
-        game_handle_input(game, camera, dt, 1280, 720);
+        world.handleInput(camera, dt, 1280, 720);
         for (int i = 0; i < steps; i++) {
-            game_update_fixed(game, (float)engine.time.tick_dt);
+            world.update((float)engine.time.tick_dt);
         }
 
         // Take screenshot every interval
         if (frame % screenshotInterval == 0) {
+            // Begin drawing to render texture (BeginTextureMode handles BeginDrawing internally)
             BeginTextureMode(target);
             ClearBackground((Color){10, 20, 30, 255});
-            game_render(game, camera, engine_time_alpha(&engine));
-            game_render_ui(game, 1280, 720);
+
+            // Render world
+            world.render(camera, engine_time_alpha(&engine));
+            world.renderUI(1280, 720);
+
             EndTextureMode();
 
             // Save screenshot
@@ -96,20 +93,20 @@ int test_visual_run(void) {
 
             char filename[256];
             snprintf(filename, sizeof(filename), "screenshots/frame_%03d.png", screenshotCount);
+            mkdir("screenshots", 0755);
+
             if (ExportImage(image, filename)) {
-                printf("  Frame %d/300: %s\n", frame, filename);
                 screenshotCount++;
             }
             UnloadImage(image);
         }
     }
 
-    printf("✓ Saved %d screenshots to screenshots/\n", screenshotCount);
-
-    game_destroy(game);
     UnloadRenderTexture(target);
     CloseWindow();
 
-    printf("✓ Visual test passed (game ran headless for 5 seconds)\n");
+    if (screenshotCount == 0) {
+        return 1;
+    }
     return 0;
 }

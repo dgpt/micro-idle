@@ -20,14 +20,18 @@ namespace micro_idle {
 namespace Layers {
     static constexpr JPH::ObjectLayer NON_MOVING = 0;
     static constexpr JPH::ObjectLayer MOVING = 1;
-    static constexpr JPH::uint NUM_LAYERS = 2;
+    static constexpr JPH::ObjectLayer SKIN = 2;        // Soft body skin (collides with ground and skeleton)
+    static constexpr JPH::ObjectLayer SKELETON = 3;    // Internal rigid skeleton (collides with skin only, ignores ground)
+    static constexpr JPH::uint NUM_LAYERS = 4;
 }
 
 // Broad phase layers (for efficient collision detection)
 namespace BroadPhaseLayers {
     static constexpr JPH::BroadPhaseLayer NON_MOVING(0);
     static constexpr JPH::BroadPhaseLayer MOVING(1);
-    static constexpr JPH::uint NUM_LAYERS(2);
+    static constexpr JPH::BroadPhaseLayer SKIN(2);
+    static constexpr JPH::BroadPhaseLayer SKELETON(3);
+    static constexpr JPH::uint NUM_LAYERS(4);
 }
 
 // BPLayerInterface maps object layers to broad phase layers

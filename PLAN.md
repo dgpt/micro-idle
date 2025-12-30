@@ -1,10 +1,10 @@
 # Micro-Idle Engine - Implementation Plan
 
 ## Current Status
-- **Phase**: 0 - Clean Slate
-- **Last Updated**: 2025-12-28
-- **Status**: Architecture redesigned - implementing Puppet/SDF approach
-- **Architecture**: Jolt SoftBody physics → SDF Raymarching renderer
+- **Phase**: Refactoring - Biological Accuracy (Visuals & Physics)
+- **Last Updated**: 2025-01-XX
+- **Status**: Refactoring amoeba simulation for biological accuracy
+- **Architecture**: Jolt SoftBody physics → SDF Raymarching renderer (with internal rigid skeleton)
 
 ---
 
@@ -39,6 +39,91 @@ A clean separation between physics simulation and visual rendering:
 - **ECS**: FLECS (Entity Component System)
 
 **Platforms**: Windows (primary), Linux, macOS
+
+---
+
+## Phase 0: Refactor Amoeba Simulation for Biological Accuracy
+
+**Objective**: Eliminate rendering artifacts and replace "floating/pushing" locomotion with biologically accurate "grip-and-stretch" friction-based model.
+
+### Phase 0.1: Rendering Artifact Elimination
+
+**Target File**: `shaders/sdf_membrane.frag`
+
+- [x] **Fix Skeleton Detachment (Blobbing)**
+  - Increased `smoothness` (k) parameter from `0.5` to **1.2** in `sdMembrane()`
+  - Smooth minimum function maintains continuous field when skeletal nodes stretch far apart
+
+- [x] **Fix Hard Edges (Precision)**
+  - Reduced `surfDist` (epsilon) from `0.01` to **0.001** in `raymarch()`
+  - Increased `maxSteps` from `64` to **128** to accommodate finer step size
+  - Reduced normal sampling epsilon `eps` from `0.001` to **0.0001** in `calcNormal()`
+
+- [ ] **Optimize Visual Volume**
+  - Adjust `baseRadius` logic to ensure membrane doesn't vanish at high stretch (TODO: test and tune)
+  - Test with extreme pseudopod extensions
+
+### Phase 0.2: Jolt Physics Architecture (Internal Motor Model)
+
+**Target Files**: `src/systems/SoftBodyFactory.cpp`, `src/systems/PhysicsSystem.h/cpp`
+
+- [x] **Refactor `CreateAmoeba` for High Friction**
+  - Set `creationSettings.mFriction` to **20.0f** (MAX) - skin must anchor to ground
+  - Decreased `creationSettings.mPressure` to **5.0f** (from 20.0f) AND increased `creationSettings.mGravityFactor` to **5.0f** for pancake/drape effect
+  - Increased `mLinearDamping` to **0.8f** to kill momentum immediately when thrust stops
+
+- [x] **Implement Internal Rigid Skeleton**
+  - Added new collision layers to `PhysicsSystem.h`:
+    - `SKIN` layer: Collides with Ground (Static) and Skeleton
+    - `SKELETON` layer: Collides with Skin (Inside) but **IGNORES Ground**
+  - Modified `CreateAmoeba` to instantiate distinct **JPH::RigidBody spheres** inside Soft Body volume
+  - Updated collision filtering in `PhysicsSystem.cpp`:
+    - Group A (Skin): Collides with Ground (Static) and Skeleton
+    - Group B (Skeleton): Collides with Skin (Inside) but **IGNORES Ground**
+
+- [x] **Update Component Structure**
+  - Added `InternalSkeleton` component to `Microbe.h`:
+    ```cpp
+    struct InternalSkeleton {
+        std::vector<JPH::BodyID> skeletonBodyIDs;  // Rigid spheres inside soft body
+        int skeletonNodeCount;                      // Number of skeleton nodes
+    };
+    ```
+
+### Phase 0.3: Friction-Based Locomotion
+
+**Target File**: `src/systems/ECMLocomotionSystem.cpp`
+
+- [x] **Refactor Force Application**
+  - Changed from applying forces to soft body vertices → apply forces **ONLY to Internal Skeleton RigidBodies**
+  - Mechanism implemented:
+    1. Skeleton moves forward → hits interior of Skin
+    2. Front of Skin stretches forward (pushed by skeleton)
+    3. Bottom of Skin stays anchored (friction)
+    4. Elastic constraints eventually pull rear of Skin forward
+
+- [x] **Update EC&M Force Functions**
+  - `applyExtensionForces`: Now applies `AddForce` to skeleton rigid bodies via `BodyInterface.AddForce()`
+  - `applySearchForces`: Applies lateral wiggle force to skeleton nodes
+  - `applyRetractionForces`: Pulls skeleton nodes back toward soft body center
+  - Updated `World.cpp` to pass `InternalSkeleton` component to `ECMLocomotionSystem::update()`
+
+### Phase 0.4: Integration & Tuning
+
+- [ ] **Visual Validation**
+  - Verify normals are smooth (no black artifacts at horizon)
+  - Verify no field disconnection at extreme stretches
+  - Test with high pseudopod extension
+
+- [ ] **Physics Validation**
+  - Verify amoeba does **NOT** move if gravity is zero (requires friction/gravity to crawl)
+  - Verify visual mesh elongates significantly before center of mass moves
+  - Test stretch behavior: membrane must elongate before effective locomotion
+
+- [ ] **Performance Check**
+  - Profile with internal skeleton (should be minimal overhead)
+  - Verify collision filtering works correctly
+  - Test multi-amoeba scenarios
 
 ---
 

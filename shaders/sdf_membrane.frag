@@ -25,7 +25,7 @@ float smin(float a, float b, float k) {
 // SDF for the microbe membrane
 float sdMembrane(vec3 p) {
     float d = 1e10;
-    float smoothness = 0.5; // Higher = more blobby
+    float smoothness = 1.2; // Increased from 0.5 to prevent skeleton detachment (blobbing)
 
     for (int i = 0; i < pointCount && i < 64; i++) {
         float sphereDist = length(p - skeletonPoints[i]) - baseRadius;
@@ -37,7 +37,7 @@ float sdMembrane(vec3 p) {
 
 // Calculate normal using gradient
 vec3 calcNormal(vec3 p) {
-    const float eps = 0.001;
+    const float eps = 0.0001; // Reduced from 0.001 to prevent normal faceting
     vec2 h = vec2(eps, 0.0);
     return normalize(vec3(
         sdMembrane(p + h.xyy) - sdMembrane(p - h.xyy),
@@ -49,9 +49,9 @@ vec3 calcNormal(vec3 p) {
 // Raymarch through the SDF
 float raymarch(vec3 ro, vec3 rd) {
     float t = 0.0;
-    const int maxSteps = 64;
+    const int maxSteps = 128; // Increased from 64 to accommodate finer step size
     const float maxDist = 100.0;
-    const float surfDist = 0.01;
+    const float surfDist = 0.001; // Reduced from 0.01 for better precision (fixes hard edges)
 
     for (int i = 0; i < maxSteps; i++) {
         vec3 p = ro + rd * t;

@@ -7,6 +7,7 @@
 #include <Jolt/Physics/SoftBody/SoftBodyMotionProperties.h>
 #include <Jolt/Physics/Body/BodyLockInterface.h>
 #include <Jolt/Physics/Body/Body.h>
+#include <vector>
 
 using namespace micro_idle;
 
@@ -35,7 +36,8 @@ static int test_create_amoeba() {
     float radius = 2.0f;
     int subdivisions = 1; // 42 vertices
 
-    JPH::BodyID bodyID = SoftBodyFactory::CreateAmoeba(physics, position, radius, subdivisions);
+    std::vector<JPH::BodyID> skeletonBodyIDs;
+    JPH::BodyID bodyID = SoftBodyFactory::CreateAmoeba(physics, position, radius, subdivisions, skeletonBodyIDs);
 
     if (bodyID.IsInvalid()) {
         delete physics;
@@ -45,11 +47,26 @@ static int test_create_amoeba() {
     // Verify body was created
     JPH::BodyInterface& bodyInterface = physics->physicsSystem->GetBodyInterface();
     if (!bodyInterface.IsAdded(bodyID)) {
+        // Clean up skeleton bodies
+        for (JPH::BodyID skeletonID : skeletonBodyIDs) {
+            if (!skeletonID.IsInvalid()) {
+                bodyInterface.RemoveBody(skeletonID);
+                bodyInterface.DestroyBody(skeletonID);
+            }
+        }
         delete physics;
         FAIL("Body was not added to physics system");
     }
 
-    // Clean up
+    // Clean up skeleton bodies
+    for (JPH::BodyID skeletonID : skeletonBodyIDs) {
+        if (!skeletonID.IsInvalid()) {
+            bodyInterface.RemoveBody(skeletonID);
+            bodyInterface.DestroyBody(skeletonID);
+        }
+    }
+
+    // Clean up soft body
     bodyInterface.RemoveBody(bodyID);
     bodyInterface.DestroyBody(bodyID);
     delete physics;
@@ -68,7 +85,8 @@ static int test_vertex_count() {
     float radius = 1.5f;
 
     // Test subdivision 0 (12 vertices)
-    JPH::BodyID bodyID0 = SoftBodyFactory::CreateAmoeba(physics, position, radius, 0);
+    std::vector<JPH::BodyID> skeleton0;
+    JPH::BodyID bodyID0 = SoftBodyFactory::CreateAmoeba(physics, position, radius, 0, skeleton0);
     int count0 = SoftBodyFactory::GetVertexCount(physics, bodyID0);
     if (count0 != 12) {
         delete physics;
@@ -76,7 +94,8 @@ static int test_vertex_count() {
     }
 
     // Test subdivision 1 (42 vertices)
-    JPH::BodyID bodyID1 = SoftBodyFactory::CreateAmoeba(physics, {1.0f, 5.0f, 0.0f}, radius, 1);
+    std::vector<JPH::BodyID> skeleton1;
+    JPH::BodyID bodyID1 = SoftBodyFactory::CreateAmoeba(physics, {1.0f, 5.0f, 0.0f}, radius, 1, skeleton1);
     int count1 = SoftBodyFactory::GetVertexCount(physics, bodyID1);
     if (count1 != 42) {
         delete physics;
@@ -84,15 +103,36 @@ static int test_vertex_count() {
     }
 
     // Test subdivision 2 (162 vertices)
-    JPH::BodyID bodyID2 = SoftBodyFactory::CreateAmoeba(physics, {2.0f, 5.0f, 0.0f}, radius, 2);
+    std::vector<JPH::BodyID> skeleton2;
+    JPH::BodyID bodyID2 = SoftBodyFactory::CreateAmoeba(physics, {2.0f, 5.0f, 0.0f}, radius, 2, skeleton2);
     int count2 = SoftBodyFactory::GetVertexCount(physics, bodyID2);
     if (count2 != 162) {
         delete physics;
         FAIL("Subdivision 2 should have 162 vertices");
     }
 
-    // Clean up
+    // Clean up skeleton bodies
     JPH::BodyInterface& bodyInterface = physics->physicsSystem->GetBodyInterface();
+    for (JPH::BodyID skeletonID : skeleton0) {
+        if (!skeletonID.IsInvalid()) {
+            bodyInterface.RemoveBody(skeletonID);
+            bodyInterface.DestroyBody(skeletonID);
+        }
+    }
+    for (JPH::BodyID skeletonID : skeleton1) {
+        if (!skeletonID.IsInvalid()) {
+            bodyInterface.RemoveBody(skeletonID);
+            bodyInterface.DestroyBody(skeletonID);
+        }
+    }
+    for (JPH::BodyID skeletonID : skeleton2) {
+        if (!skeletonID.IsInvalid()) {
+            bodyInterface.RemoveBody(skeletonID);
+            bodyInterface.DestroyBody(skeletonID);
+        }
+    }
+
+    // Clean up soft bodies
     bodyInterface.RemoveBody(bodyID0);
     bodyInterface.DestroyBody(bodyID0);
     bodyInterface.RemoveBody(bodyID1);
@@ -115,7 +155,8 @@ static int test_extract_positions() {
     float radius = 2.0f;
     int subdivisions = 1; // 42 vertices
 
-    JPH::BodyID bodyID = SoftBodyFactory::CreateAmoeba(physics, position, radius, subdivisions);
+    std::vector<JPH::BodyID> skeletonBodyIDs;
+    JPH::BodyID bodyID = SoftBodyFactory::CreateAmoeba(physics, position, radius, subdivisions, skeletonBodyIDs);
 
     // Extract positions
     Vector3 positions[256];
@@ -147,8 +188,16 @@ static int test_extract_positions() {
         FAIL("Vertices should be roughly at sphere radius");
     }
 
-    // Clean up
+    // Clean up skeleton bodies
     JPH::BodyInterface& bodyInterface = physics->physicsSystem->GetBodyInterface();
+    for (JPH::BodyID skeletonID : skeletonBodyIDs) {
+        if (!skeletonID.IsInvalid()) {
+            bodyInterface.RemoveBody(skeletonID);
+            bodyInterface.DestroyBody(skeletonID);
+        }
+    }
+
+    // Clean up soft body
     bodyInterface.RemoveBody(bodyID);
     bodyInterface.DestroyBody(bodyID);
     delete physics;
@@ -166,7 +215,8 @@ static int test_softbody_properties() {
     Vector3 position = {0.0f, 5.0f, 0.0f};
     float radius = 2.0f;
 
-    JPH::BodyID bodyID = SoftBodyFactory::CreateAmoeba(physics, position, radius, 1);
+    std::vector<JPH::BodyID> skeletonBodyIDs;
+    JPH::BodyID bodyID = SoftBodyFactory::CreateAmoeba(physics, position, radius, 1, skeletonBodyIDs);
 
     // Lock and verify properties (use scope to ensure lock is released)
     {
@@ -185,9 +235,9 @@ static int test_softbody_properties() {
             FAIL("Motion properties are null");
         }
 
-        // Verify pressure is set
+        // Verify pressure is set (we use 5.0f for friction-based grip-and-stretch model)
         float pressure = motionProps->GetPressure();
-        if (pressure < 50.0f || pressure > 150.0f) {
+        if (pressure < 1.0f || pressure > 20.0f) {
             delete physics;
             FAIL("Pressure out of expected range");
         }
@@ -200,8 +250,16 @@ static int test_softbody_properties() {
         }
     } // Lock released here
 
-    // Clean up
+    // Clean up skeleton bodies
     JPH::BodyInterface& bodyInterface = physics->physicsSystem->GetBodyInterface();
+    for (JPH::BodyID skeletonID : skeletonBodyIDs) {
+        if (!skeletonID.IsInvalid()) {
+            bodyInterface.RemoveBody(skeletonID);
+            bodyInterface.DestroyBody(skeletonID);
+        }
+    }
+
+    // Clean up soft body
     bodyInterface.RemoveBody(bodyID);
     bodyInterface.DestroyBody(bodyID);
     delete physics;
@@ -248,7 +306,11 @@ static int test_simulation_step() {
     Vector3 position = {0.0f, 10.0f, 0.0f}; // Start high up
     float radius = 1.5f;
 
-    JPH::BodyID bodyID = SoftBodyFactory::CreateAmoeba(physics, position, radius, 1);
+    std::vector<JPH::BodyID> skeletonBodyIDs;
+    JPH::BodyID bodyID = SoftBodyFactory::CreateAmoeba(physics, position, radius, 1, skeletonBodyIDs);
+
+    // Enable gravity for this test
+    physics->physicsSystem->SetGravity(JPH::Vec3(0, -9.81f, 0));
 
     // Get initial position
     JPH::BodyInterface& bodyInterface = physics->physicsSystem->GetBodyInterface();
@@ -262,13 +324,30 @@ static int test_simulation_step() {
     // Get final position
     JPH::RVec3 finalPos = bodyInterface.GetCenterOfMassPosition(bodyID);
 
-    // Should have fallen due to gravity
-    if (finalPos.GetY() >= initialPos.GetY()) {
+    // Should have fallen due to gravity (or at least moved due to physics)
+    if (finalPos.GetY() >= initialPos.GetY() - 0.01f) {
+        // Clean up skeleton bodies
+        for (JPH::BodyID skeletonID : skeletonBodyIDs) {
+            if (!skeletonID.IsInvalid()) {
+                bodyInterface.RemoveBody(skeletonID);
+                bodyInterface.DestroyBody(skeletonID);
+            }
+        }
+        bodyInterface.RemoveBody(bodyID);
+        bodyInterface.DestroyBody(bodyID);
         delete physics;
         FAIL("Soft body should have fallen due to gravity");
     }
 
-    // Clean up
+    // Clean up skeleton bodies
+    for (JPH::BodyID skeletonID : skeletonBodyIDs) {
+        if (!skeletonID.IsInvalid()) {
+            bodyInterface.RemoveBody(skeletonID);
+            bodyInterface.DestroyBody(skeletonID);
+        }
+    }
+
+    // Clean up soft body
     bodyInterface.RemoveBody(bodyID);
     bodyInterface.DestroyBody(bodyID);
     delete physics;

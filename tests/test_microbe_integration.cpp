@@ -101,8 +101,13 @@ static int test_microbe_simulation() {
     transform = entity.get<components::Transform>();
     microbe = entity.get<components::Microbe>();
 
-    // Phase should have progressed
-    if (fabsf(microbe->locomotion.phase - initialPhase) < 0.01f) {
+    // Phase should have progressed (over 1 second, phase increments by ~1/120 ≈ 0.0083)
+    float phaseChange = fabsf(microbe->locomotion.phase - initialPhase);
+    // Account for phase wrapping (if phase > 1.0, it wraps to 0.0)
+    if (phaseChange > 0.5f) {
+        phaseChange = 1.0f - phaseChange; // Wrapped around
+    }
+    if (phaseChange < 0.005f) {
         FAIL("Locomotion phase should have changed");
     }
 

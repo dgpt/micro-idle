@@ -17,8 +17,10 @@ public:
     static constexpr float RETRACT_PHASE = 1.0f;   // 0.67 - 1.0
 
     // Update EC&M locomotion for one microbe
+    // Applies forces to internal skeleton rigid bodies (friction-based grip-and-stretch model)
     static void update(
         components::Microbe& microbe,
+        components::InternalSkeleton& skeleton,
         PhysicsSystemState* physics,
         float dt
     );
@@ -33,21 +35,24 @@ private:
     static constexpr float WIGGLE_FORCE = 50.0f;
     static constexpr float RETRACT_FORCE = 100.0f;
 
-    // Apply forces based on current phase
+    // Apply forces based on current phase (to skeleton rigid bodies)
     static void applyExtensionForces(
         components::Microbe& microbe,
+        components::InternalSkeleton& skeleton,
         PhysicsSystemState* physics,
         float dt
     );
 
     static void applySearchForces(
         components::Microbe& microbe,
+        components::InternalSkeleton& skeleton,
         PhysicsSystemState* physics,
         float dt
     );
 
     static void applyRetractionForces(
         components::Microbe& microbe,
+        components::InternalSkeleton& skeleton,
         PhysicsSystemState* physics,
         float dt
     );

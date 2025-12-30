@@ -3,7 +3,9 @@
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Body/BodyID.h>
+#include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include "raylib.h"
+#include <vector>
 
 namespace micro_idle {
 
@@ -20,18 +22,21 @@ class SoftBodyFactory {
 public:
     /**
      * Create an amoeba soft body using proper Jolt soft body physics
+     * Implements "Internal Motor" model: soft body skin with internal rigid skeleton
      *
      * @param physics The physics system
      * @param position Center position
      * @param radius Approximate radius
      * @param subdivisions Icosphere subdivisions (0=12 verts, 1=42 verts, 2=162 verts)
-     * @return Jolt BodyID for the created soft body
+     * @param outSkeletonBodyIDs Output vector to store skeleton rigid body IDs (internal motor)
+     * @return Jolt BodyID for the created soft body (skin)
      */
     static JPH::BodyID CreateAmoeba(
         PhysicsSystemState* physics,
         Vector3 position,
         float radius,
-        int subdivisions = 1
+        int subdivisions,
+        std::vector<JPH::BodyID>& outSkeletonBodyIDs
     );
 
     /**

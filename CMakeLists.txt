@@ -121,6 +121,7 @@ add_executable(tests
     tests/test_engine.cpp
     tests/test_game_constants.cpp
     tests/test_visual.cpp
+    tests/test_game_render.cpp
     tests/test_icosphere.cpp
     tests/test_constraints.cpp
     tests/test_softbody_factory.cpp

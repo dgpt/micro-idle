@@ -33,9 +33,8 @@ World::World() {
     // Initialize Jolt physics
     physics = new PhysicsSystemState();
 
-    // Load SDF membrane shader
-    sdfMembraneShader = LoadShader("shaders/sdf_membrane.vert", "shaders/sdf_membrane.frag");
-    printf("Loaded SDF membrane shader (ID: %d)\n", sdfMembraneShader.id);
+    // Shader will be loaded lazily in render() when window is available
+    sdfMembraneShader.id = 0;
 
     // Register components and systems
     registerComponents();
@@ -65,7 +64,10 @@ World::~World() {
         delete boundaries;
     }
 
-    UnloadShader(sdfMembraneShader);
+    // Only unload shader if it was loaded
+    if (sdfMembraneShader.id != 0) {
+        UnloadShader(sdfMembraneShader);
+    }
     delete physics;
 }
 
@@ -117,9 +119,9 @@ void World::registerPhysicsObservers() {
 }
 
 void World::update(float dt) {
-    // Update EC&M locomotion for all microbes
-    world.each([this, dt](flecs::entity e, components::Microbe& microbe) {
-        ECMLocomotionSystem::update(microbe, physics, dt);
+    // Update EC&M locomotion for all microbes (apply forces to internal skeleton)
+    world.each([this, dt](flecs::entity e, components::Microbe& microbe, components::InternalSkeleton& skeleton) {
+        ECMLocomotionSystem::update(microbe, skeleton, physics, dt);
     });
 
     // Update physics
@@ -168,6 +170,15 @@ void World::update(float dt) {
 }
 
 void World::render(Camera3D camera, float alpha) {
+    // Lazy load shader if window is available
+    if (sdfMembraneShader.id == 0 && IsWindowReady()) {
+        sdfMembraneShader = LoadShader("shaders/sdf_membrane.vert", "shaders/sdf_membrane.frag");
+        if (sdfMembraneShader.id == 0) {
+            // Try fallback path
+            sdfMembraneShader = LoadShader("data/shaders/sdf_membrane.vert", "data/shaders/sdf_membrane.frag");
+        }
+    }
+
     // Begin 3D mode
     BeginMode3D(camera);
 
@@ -197,6 +208,9 @@ void World::render(Camera3D camera, float alpha) {
         // Calculate bounding sphere for the microbe
         Vector3 center = transform.position;
         float boundRadius = microbe.stats.baseRadius * 2.5f; // Bounding radius for raymarch volume
+
+        // Skip shader rendering if shader not loaded (for tests without window)
+        if (sdfMembraneShader.id == 0) return;
 
         // Begin shader mode
         BeginShaderMode(sdfMembraneShader);
@@ -298,13 +312,20 @@ flecs::entity World::createAmoeba(Vector3 position, float radius, Color color) {
     microbe.stats.health = 100.0f;
     microbe.stats.energy = 100.0f;
 
-    // Create Jolt soft body using Puppet architecture
+    // Create Jolt soft body using Puppet architecture with internal skeleton (Internal Motor model)
     int subdivisions = 1;  // 42 vertices (good balance for amoeba)
-    microbe.softBody.bodyID = SoftBodyFactory::CreateAmoeba(physics, position, radius, subdivisions);
+    std::vector<JPH::BodyID> skeletonBodyIDs;
+    microbe.softBody.bodyID = SoftBodyFactory::CreateAmoeba(physics, position, radius, subdivisions, skeletonBodyIDs);
     microbe.softBody.vertexCount = SoftBodyFactory::GetVertexCount(physics, microbe.softBody.bodyID);
     microbe.softBody.subdivisions = subdivisions;
 
     printf("  Created soft body with %d vertices\n", microbe.softBody.vertexCount);
+
+    // Create and set InternalSkeleton component
+    components::InternalSkeleton skeleton;
+    skeleton.skeletonBodyIDs = skeletonBodyIDs;
+    skeleton.skeletonNodeCount = (int)skeletonBodyIDs.size();
+    entity.set<components::InternalSkeleton>(skeleton);
 
     // Initialize EC&M locomotion with unique random values based on microbe's seed
     auto hashFloat = [](float seed, int iter) -> float {

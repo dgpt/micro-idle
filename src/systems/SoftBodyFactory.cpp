@@ -6,8 +6,12 @@
 #include <Jolt/Physics/SoftBody/SoftBodyCreationSettings.h>
 #include <Jolt/Physics/SoftBody/SoftBodyMotionProperties.h>
 #include <Jolt/Physics/Body/Body.h>
+#include <Jolt/Physics/Body/BodyCreationSettings.h>
+#include <Jolt/Physics/Body/BodyInterface.h>
 #include <Jolt/Physics/Constraints/DistanceConstraint.h>
+#include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <stdio.h>
+#include <vector>
 
 namespace micro_idle {
 
@@ -15,7 +19,8 @@ JPH::BodyID SoftBodyFactory::CreateAmoeba(
     PhysicsSystemState* physics,
     Vector3 position,
     float radius,
-    int subdivisions
+    int subdivisions,
+    std::vector<JPH::BodyID>& outSkeletonBodyIDs
 ) {
     printf("SoftBodyFactory: Creating amoeba (subdivisions=%d, radius=%.2f)\n", subdivisions, radius);
 
@@ -67,16 +72,16 @@ JPH::BodyID SoftBodyFactory::CreateAmoeba(
         sharedSettings,
         JPH::RVec3(position.x, position.y, position.z),
         JPH::Quat::sIdentity(),
-        Layers::MOVING
+        Layers::SKIN  // Skin layer: collides with ground and skeleton
     );
 
-    // Configure soft body physics properties
-    creationSettings.mPressure = 20.0f;            // Lower pressure allows more deformation
+    // Configure soft body physics properties for friction-based grip-and-stretch model
+    creationSettings.mPressure = 5.0f;             // Reduced from 20.0f to allow pancake/drape over terrain
     creationSettings.mRestitution = 0.1f;          // Minimal bounciness - amoebas don't bounce
-    creationSettings.mFriction = 8.0f;             // VERY high friction for substrate grip (0-10 range)
-    creationSettings.mLinearDamping = 0.4f;        // Higher damping to prevent excessive motion
-    creationSettings.mGravityFactor = 2.0f;        // Strong gravity - keeps them on ground
-    creationSettings.mNumIterations = 16;          // Higher for stability with soft constraints
+    creationSettings.mFriction = 20.0f;            // MAX friction (20.0f) - skin must anchor to ground, not slide
+    creationSettings.mLinearDamping = 0.8f;        // Increased from 0.4f to kill momentum immediately when thrust stops
+    creationSettings.mGravityFactor = 5.0f;         // Increased from 2.0f to force pancake/drape effect
+    creationSettings.mNumIterations = 16;           // Higher for stability with soft constraints
     creationSettings.mUpdatePosition = true;       // Update body position
     creationSettings.mMakeRotationIdentity = true; // Bake rotation into vertices
     creationSettings.mAllowSleeping = false;       // Keep always active for gameplay
@@ -94,6 +99,57 @@ JPH::BodyID SoftBodyFactory::CreateAmoeba(
     }
 
     printf("  Soft body created successfully (BodyID: %u)\n", bodyID.GetIndexAndSequenceNumber());
+
+    // Step 6: Create internal rigid skeleton (Internal Motor model)
+    // Skeleton nodes are rigid spheres inside the soft body that push against the skin
+    // Skeleton collides with skin but ignores ground (friction-based locomotion)
+    JPH::BodyInterface& bodyInterface = physics->physicsSystem->GetBodyInterface();
+
+    // Create 3-5 skeleton nodes positioned inside the soft body
+    int skeletonNodeCount = 3;  // Start with 3 nodes, can be increased for more complex behavior
+    float skeletonRadius = radius * 0.15f;  // Skeleton nodes are smaller than soft body
+    float skeletonSpacing = radius * 0.4f;   // Spacing between skeleton nodes
+
+    outSkeletonBodyIDs.clear();
+    outSkeletonBodyIDs.reserve(skeletonNodeCount);
+
+    for (int i = 0; i < skeletonNodeCount; i++) {
+        // Position skeleton nodes in a line along X axis (can be customized)
+        float offsetX = (i - (skeletonNodeCount - 1) * 0.5f) * skeletonSpacing;
+        JPH::Vec3 skeletonPos(
+            position.x + offsetX,
+            position.y,  // Same Y as soft body center
+            position.z
+        );
+
+        // Create sphere shape for skeleton node
+        JPH::SphereShapeSettings sphereSettings(skeletonRadius);
+        JPH::ShapeSettings::ShapeResult shapeResult = sphereSettings.Create();
+        JPH::ShapeRefC sphereShape = shapeResult.Get();
+
+        // Create rigid body for skeleton node
+        JPH::BodyCreationSettings skeletonSettings(
+            sphereShape,
+            JPH::RVec3(skeletonPos.GetX(), skeletonPos.GetY(), skeletonPos.GetZ()),
+            JPH::Quat::sIdentity(),
+            JPH::EMotionType::Dynamic,
+            Layers::SKELETON  // Skeleton layer: collides with skin only, ignores ground
+        );
+
+        // Lock Y axis for 2D simulation
+        skeletonSettings.mAllowedDOFs = JPH::EAllowedDOFs::TranslationX | JPH::EAllowedDOFs::TranslationZ;
+
+        // Create and add skeleton body
+        JPH::Body* skeletonBody = bodyInterface.CreateBody(skeletonSettings);
+        if (skeletonBody) {
+            JPH::BodyID skeletonBodyID = skeletonBody->GetID();
+            bodyInterface.AddBody(skeletonBodyID, JPH::EActivation::Activate);
+            outSkeletonBodyIDs.push_back(skeletonBodyID);
+            printf("  Created skeleton node %d (BodyID: %u)\n", i, skeletonBodyID.GetIndexAndSequenceNumber());
+        }
+    }
+
+    printf("  Created %zu internal skeleton nodes\n", outSkeletonBodyIDs.size());
 
     return bodyID;
 }

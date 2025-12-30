@@ -25,6 +25,8 @@ namespace micro_idle {
 BPLayerInterfaceImpl::BPLayerInterfaceImpl() {
     mObjectToBroadPhase[Layers::NON_MOVING] = BroadPhaseLayers::NON_MOVING;
     mObjectToBroadPhase[Layers::MOVING] = BroadPhaseLayers::MOVING;
+    mObjectToBroadPhase[Layers::SKIN] = BroadPhaseLayers::SKIN;
+    mObjectToBroadPhase[Layers::SKELETON] = BroadPhaseLayers::SKELETON;
 }
 
 JPH::BroadPhaseLayer BPLayerInterfaceImpl::GetBroadPhaseLayer(JPH::ObjectLayer inLayer) const {
@@ -37,9 +39,13 @@ JPH::BroadPhaseLayer BPLayerInterfaceImpl::GetBroadPhaseLayer(JPH::ObjectLayer i
 bool ObjectVsBroadPhaseLayerFilterImpl::ShouldCollide(JPH::ObjectLayer inLayer1, JPH::BroadPhaseLayer inLayer2) const {
     switch (inLayer1) {
         case Layers::NON_MOVING:
-            return inLayer2 == BroadPhaseLayers::MOVING;
+            return inLayer2 == BroadPhaseLayers::MOVING || inLayer2 == BroadPhaseLayers::SKIN;
         case Layers::MOVING:
             return true; // Moving objects collide with everything
+        case Layers::SKIN:
+            return inLayer2 == BroadPhaseLayers::NON_MOVING || inLayer2 == BroadPhaseLayers::SKELETON;
+        case Layers::SKELETON:
+            return inLayer2 == BroadPhaseLayers::SKIN; // Skeleton only collides with skin, ignores ground
         default:
             JPH_ASSERT(false);
             return false;
@@ -50,9 +56,13 @@ bool ObjectVsBroadPhaseLayerFilterImpl::ShouldCollide(JPH::ObjectLayer inLayer1,
 bool ObjectLayerPairFilterImpl::ShouldCollide(JPH::ObjectLayer inObject1, JPH::ObjectLayer inObject2) const {
     switch (inObject1) {
         case Layers::NON_MOVING:
-            return inObject2 == Layers::MOVING; // Non-moving only collides with moving
+            return inObject2 == Layers::MOVING || inObject2 == Layers::SKIN;
         case Layers::MOVING:
             return true; // Moving collides with everything
+        case Layers::SKIN:
+            return inObject2 == Layers::NON_MOVING || inObject2 == Layers::SKELETON;
+        case Layers::SKELETON:
+            return inObject2 == Layers::SKIN; // Skeleton only collides with skin, ignores ground
         default:
             JPH_ASSERT(false);
             return false;
