@@ -73,7 +73,7 @@ void ECMLocomotionSystem::update(
     } else if (loco.isSearching) {
         applySearchForces(microbe, skeleton, physics, dt);
     } else if (loco.isRetracting) {
-        applyRetractionForces(microbe, skeleton, physics, dt);
+        applyRetractionForces(microbe, physics, dt);
     }
 
     // Update wiggle phase for lateral motion
@@ -146,41 +146,45 @@ void ECMLocomotionSystem::applySearchForces(
 
 void ECMLocomotionSystem::applyRetractionForces(
     components::Microbe& microbe,
-    components::InternalSkeleton& skeleton,
     PhysicsSystemState* physics,
     float dt
 ) {
-    // Pull skeleton nodes back toward soft body center
-    if (skeleton.skeletonBodyIDs.empty()) return;
+    int targetIdx = microbe.locomotion.targetVertexIndex;
+    JPH::BodyID bodyID = microbe.softBody.bodyID;
+    if (bodyID.IsInvalid()) return;
 
-    JPH::BodyInterface& bodyInterface = physics->physicsSystem->GetBodyInterface();
+    JPH::BodyLockWrite lock(physics->physicsSystem->GetBodyLockInterface(), bodyID);
+    if (!lock.Succeeded()) return;
 
-    // Get soft body center of mass
-    JPH::BodyID softBodyID = microbe.softBody.bodyID;
-    if (softBodyID.IsInvalid()) return;
+    JPH::Body& body = lock.GetBody();
+    JPH::SoftBodyMotionProperties* motionProps =
+        static_cast<JPH::SoftBodyMotionProperties*>(body.GetMotionProperties());
+    if (motionProps == nullptr) return;
 
-    JPH::RVec3 center = bodyInterface.GetCenterOfMassPosition(softBodyID);
+    JPH::Array<JPH::SoftBodyVertex>& vertices = motionProps->GetVertices();
+    if (targetIdx >= (int)vertices.size()) return;
 
-    // Apply retraction force to target skeleton node
-    int targetSkeletonIdx = microbe.locomotion.targetVertexIndex % (int)skeleton.skeletonBodyIDs.size();
-    JPH::BodyID skeletonBodyID = skeleton.skeletonBodyIDs[targetSkeletonIdx];
+    // 1. Calculate direction from Center-of-Mass to Target Vertex
+    JPH::RMat44 comTransform = JPH::RMat44::sRotationTranslation(body.GetRotation(), body.GetCenterOfMassPosition());
+    JPH::Vec3 worldPosVertex = comTransform * vertices[targetIdx].mPosition;
+    JPH::Vec3 center = body.GetCenterOfMassPosition();
 
-    if (skeletonBodyID.IsInvalid()) return;
+    JPH::Vec3 pullDir = worldPosVertex - center;
+    float dist = pullDir.Length();
+    if (dist < 0.001f) return;
+    pullDir /= dist;
 
-    // Get skeleton node position
-    JPH::RVec3 skeletonPos = bodyInterface.GetCenterOfMassPosition(skeletonBodyID);
+    // 2. Normalize Force: Prevent "Force Explosion" by dividing by vertex count
+    float vertexCount = (float)vertices.size();
+    if (vertexCount <= 1.0f) return;
 
-    // Direction from skeleton to soft body center
-    JPH::Vec3 toCenter = center - skeletonPos;
+    float forcePerVertex = RETRACT_FORCE / (vertexCount - 1.0f);
+    float velocityMagnitude = forcePerVertex * dt * 5.0f; // 5x multiplier to overcome damping
+    JPH::Vec3 velocityImpulse = pullDir * velocityMagnitude;
 
-    // Normalize and calculate retraction force
-    float length = toCenter.Length();
-    if (length > 0.001f) {
-        toCenter /= length;
-
-        // Apply force toward center
-        JPH::Vec3 force = toCenter * RETRACT_FORCE;
-        bodyInterface.AddForce(skeletonBodyID, force);
+    for (size_t i = 0; i < vertices.size(); ++i) {
+        if ((int)i == targetIdx) continue; // Don't move the foot (anchor)
+        vertices[i].mVelocity += velocityImpulse;
     }
 }
 

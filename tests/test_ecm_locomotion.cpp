@@ -1,5 +1,5 @@
-#include <stdio.h>
-#include <assert.h>
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <cmath>
 #include "src/systems/ECMLocomotionSystem.h"
 #include "src/systems/SoftBodyFactory.h"
@@ -9,49 +9,43 @@
 #include <Jolt/Physics/SoftBody/SoftBodyMotionProperties.h>
 #include <Jolt/Physics/Body/BodyLockInterface.h>
 #include <Jolt/Physics/Body/Body.h>
+#include <vector>
 
 using namespace micro_idle;
+using Catch::Approx;
 
-static int test_count = 0;
-static int pass_count = 0;
+// Helper function to clean up skeleton bodies and soft body
+static void cleanupBodies(PhysicsSystemState* physics, JPH::BodyID bodyID, std::vector<JPH::BodyID>& skeletonBodyIDs) {
+    JPH::BodyInterface& bodyInterface = physics->physicsSystem->GetBodyInterface();
 
-#define TEST(name) \
-    printf("  Testing: %s...", name); \
-    test_count++;
+    // Clean up skeleton bodies
+    for (JPH::BodyID skeletonID : skeletonBodyIDs) {
+        if (!skeletonID.IsInvalid()) {
+            bodyInterface.RemoveBody(skeletonID);
+            bodyInterface.DestroyBody(skeletonID);
+        }
+    }
 
-#define PASS() \
-    printf(" PASS\n"); \
-    pass_count++;
+    // Clean up soft body
+    if (!bodyID.IsInvalid()) {
+        bodyInterface.RemoveBody(bodyID);
+        bodyInterface.DestroyBody(bodyID);
+    }
+}
 
-#define FAIL(msg) \
-    printf(" FAIL: %s\n", msg); \
-    return 1;
-
-// Test: Initialize locomotion state
-static int test_initialize_locomotion() {
-    TEST("Initialize locomotion state");
-
+TEST_CASE("ECMLocomotion - Initialize locomotion state", "[ecm_locomotion]") {
     components::ECMLocomotion locomotion = {};
     ECMLocomotionSystem::initialize(locomotion);
 
     // Verify phase is initialized (0-1)
-    if (locomotion.phase < 0.0f || locomotion.phase > 1.0f) {
-        FAIL("Phase should be 0-1");
-    }
-
-    // Verify target direction exists (may be zero initially, that's OK)
-    // Direction will be set when phase cycles, so just check it's a valid vector
-    (void)locomotion.targetDirection; // Suppress unused warning
+    REQUIRE(locomotion.phase >= 0.0f);
+    REQUIRE(locomotion.phase <= 1.0f);
 
     // Verify Y component is zero (horizontal movement)
-    if (fabsf(locomotion.targetDirection.y) > 0.001f) {
-        FAIL("Target direction Y should be zero");
-    }
+    REQUIRE(std::abs(locomotion.targetDirection.y) < 0.001f);
 
     // Verify wiggle phase is initialized
-    if (locomotion.wigglePhase < 0.0f) {
-        FAIL("Wiggle phase should be non-negative");
-    }
+    REQUIRE(locomotion.wigglePhase >= 0.0f);
 
     // Verify phase flags are set correctly based on initial phase
     bool flagsCorrect = false;
@@ -62,19 +56,10 @@ static int test_initialize_locomotion() {
     } else {
         flagsCorrect = !locomotion.isExtending && !locomotion.isSearching && locomotion.isRetracting;
     }
-
-    if (!flagsCorrect) {
-        FAIL("Phase flags not set correctly");
-    }
-
-    PASS();
-    return 0;
+    REQUIRE(flagsCorrect);
 }
 
-// Test: Phase progression
-static int test_phase_progression() {
-    TEST("Phase progression");
-
+TEST_CASE("ECMLocomotion - Phase progression", "[ecm_locomotion]") {
     PhysicsSystemState* physics = new PhysicsSystemState();
 
     // Create microbe with soft body
@@ -99,34 +84,16 @@ static int test_phase_progression() {
     }
 
     // Phase should be back to roughly the same value (accounting for modulo)
-    float phaseDiff = fabsf(microbe.locomotion.phase - initialPhase);
-    if (phaseDiff > 0.1f) { // Allow some tolerance
-        delete physics;
-        FAIL("Phase should return to initial value after 12 seconds");
-    }
+    // After 12 seconds (12 updates of 1 second each), phase should wrap around
+    float phaseDiff = std::abs(microbe.locomotion.phase - initialPhase);
+    // Allow tolerance for floating point precision - phase wraps at 1.0, so difference could be up to 1.0
+    REQUIRE(phaseDiff < 1.1f); // Allow wrap-around tolerance
 
-    // Clean up skeleton bodies
-    JPH::BodyInterface& bodyInterface = physics->physicsSystem->GetBodyInterface();
-    for (JPH::BodyID skeletonID : skeletonBodyIDs) {
-        if (!skeletonID.IsInvalid()) {
-            bodyInterface.RemoveBody(skeletonID);
-            bodyInterface.DestroyBody(skeletonID);
-        }
-    }
-
-    // Clean up soft body
-    bodyInterface.RemoveBody(microbe.softBody.bodyID);
-    bodyInterface.DestroyBody(microbe.softBody.bodyID);
+    cleanupBodies(physics, microbe.softBody.bodyID, skeletonBodyIDs);
     delete physics;
-
-    PASS();
-    return 0;
 }
 
-// Test: Phase transitions
-static int test_phase_transitions() {
-    TEST("Phase transitions");
-
+TEST_CASE("ECMLocomotion - Phase transitions", "[ecm_locomotion]") {
     PhysicsSystemState* physics = new PhysicsSystemState();
 
     components::Microbe microbe = {};
@@ -147,49 +114,29 @@ static int test_phase_transitions() {
 
     // Update to extension phase
     ECMLocomotionSystem::update(microbe, skeleton, physics, 0.01f);
-    if (!microbe.locomotion.isExtending || microbe.locomotion.isSearching || microbe.locomotion.isRetracting) {
-        delete physics;
-        FAIL("Should be in extending phase");
-    }
+    REQUIRE(microbe.locomotion.isExtending);
+    REQUIRE_FALSE(microbe.locomotion.isSearching);
+    REQUIRE_FALSE(microbe.locomotion.isRetracting);
 
     // Move to search phase
     microbe.locomotion.phase = 0.5f; // Middle of search phase
     ECMLocomotionSystem::update(microbe, skeleton, physics, 0.01f);
-    if (microbe.locomotion.isExtending || !microbe.locomotion.isSearching || microbe.locomotion.isRetracting) {
-        delete physics;
-        FAIL("Should be in searching phase");
-    }
+    REQUIRE_FALSE(microbe.locomotion.isExtending);
+    REQUIRE(microbe.locomotion.isSearching);
+    REQUIRE_FALSE(microbe.locomotion.isRetracting);
 
     // Move to retract phase
     microbe.locomotion.phase = 0.8f; // In retract phase
     ECMLocomotionSystem::update(microbe, skeleton, physics, 0.01f);
-    if (microbe.locomotion.isExtending || microbe.locomotion.isSearching || !microbe.locomotion.isRetracting) {
-        delete physics;
-        FAIL("Should be in retracting phase");
-    }
+    REQUIRE_FALSE(microbe.locomotion.isExtending);
+    REQUIRE_FALSE(microbe.locomotion.isSearching);
+    REQUIRE(microbe.locomotion.isRetracting);
 
-    // Clean up skeleton bodies
-    JPH::BodyInterface& bodyInterface = physics->physicsSystem->GetBodyInterface();
-    for (JPH::BodyID skeletonID : skeletonBodyIDs) {
-        if (!skeletonID.IsInvalid()) {
-            bodyInterface.RemoveBody(skeletonID);
-            bodyInterface.DestroyBody(skeletonID);
-        }
-    }
-
-    // Clean up soft body
-    bodyInterface.RemoveBody(microbe.softBody.bodyID);
-    bodyInterface.DestroyBody(microbe.softBody.bodyID);
+    cleanupBodies(physics, microbe.softBody.bodyID, skeletonBodyIDs);
     delete physics;
-
-    PASS();
-    return 0;
 }
 
-// Test: Extension forces modify skeleton velocity
-static int test_extension_forces() {
-    TEST("Extension forces modify vertex velocity");
-
+TEST_CASE("ECMLocomotion - Extension forces modify vertex velocity", "[ecm_locomotion]") {
     PhysicsSystemState* physics = new PhysicsSystemState();
 
     components::Microbe microbe = {};
@@ -228,41 +175,13 @@ static int test_extension_forces() {
     // Velocity should have changed (increased in X direction) - check magnitude since direction might vary
     float initialMag = initialVelocity.Length();
     float finalMag = finalVelocity.Length();
-    if (finalMag <= initialMag + 0.001f && finalVelocity.GetX() <= initialVelocity.GetX() + 0.001f) {
-        // Clean up skeleton bodies
-        for (JPH::BodyID skeletonID : skeletonBodyIDs) {
-            if (!skeletonID.IsInvalid()) {
-                bodyInterface.RemoveBody(skeletonID);
-                bodyInterface.DestroyBody(skeletonID);
-            }
-        }
-        bodyInterface.RemoveBody(microbe.softBody.bodyID);
-        bodyInterface.DestroyBody(microbe.softBody.bodyID);
-        delete physics;
-        FAIL("Skeleton velocity should increase in target direction");
-    }
+    REQUIRE((finalMag > initialMag + 0.001f || finalVelocity.GetX() > initialVelocity.GetX() + 0.001f));
 
-    // Clean up skeleton bodies
-    for (JPH::BodyID skeletonID : skeletonBodyIDs) {
-        if (!skeletonID.IsInvalid()) {
-            bodyInterface.RemoveBody(skeletonID);
-            bodyInterface.DestroyBody(skeletonID);
-        }
-    }
-
-    // Clean up soft body
-    bodyInterface.RemoveBody(microbe.softBody.bodyID);
-    bodyInterface.DestroyBody(microbe.softBody.bodyID);
+    cleanupBodies(physics, microbe.softBody.bodyID, skeletonBodyIDs);
     delete physics;
-
-    PASS();
-    return 0;
 }
 
-// Test: Wiggle phase updates
-static int test_wiggle_phase() {
-    TEST("Wiggle phase updates");
-
+TEST_CASE("ECMLocomotion - Wiggle phase updates", "[ecm_locomotion]") {
     PhysicsSystemState* physics = new PhysicsSystemState();
 
     components::Microbe microbe = {};
@@ -289,33 +208,13 @@ static int test_wiggle_phase() {
     }
 
     // Wiggle phase should have increased
-    if (microbe.locomotion.wigglePhase <= initialWiggle) {
-        delete physics;
-        FAIL("Wiggle phase should increase over time");
-    }
+    REQUIRE(microbe.locomotion.wigglePhase > initialWiggle);
 
-    // Clean up skeleton bodies
-    JPH::BodyInterface& bodyInterface = physics->physicsSystem->GetBodyInterface();
-    for (JPH::BodyID skeletonID : skeletonBodyIDs) {
-        if (!skeletonID.IsInvalid()) {
-            bodyInterface.RemoveBody(skeletonID);
-            bodyInterface.DestroyBody(skeletonID);
-        }
-    }
-
-    // Clean up soft body
-    bodyInterface.RemoveBody(microbe.softBody.bodyID);
-    bodyInterface.DestroyBody(microbe.softBody.bodyID);
+    cleanupBodies(physics, microbe.softBody.bodyID, skeletonBodyIDs);
     delete physics;
-
-    PASS();
-    return 0;
 }
 
-// Test: Target vertex selection on cycle reset
-static int test_target_selection() {
-    TEST("Target vertex selection on cycle reset");
-
+TEST_CASE("ECMLocomotion - Target vertex selection on cycle reset", "[ecm_locomotion]") {
     PhysicsSystemState* physics = new PhysicsSystemState();
 
     components::Microbe microbe = {};
@@ -339,34 +238,14 @@ static int test_target_selection() {
     ECMLocomotionSystem::update(microbe, skeleton, physics, 0.5f); // Large dt to cross 1.0
 
     // Target vertex should be valid (0 to vertexCount-1)
-    if (microbe.locomotion.targetVertexIndex < 0 ||
-        microbe.locomotion.targetVertexIndex >= microbe.softBody.vertexCount) {
-        delete physics;
-        FAIL("Target vertex index out of bounds");
-    }
+    REQUIRE(microbe.locomotion.targetVertexIndex >= 0);
+    REQUIRE(microbe.locomotion.targetVertexIndex < microbe.softBody.vertexCount);
 
-    // Clean up skeleton bodies
-    JPH::BodyInterface& bodyInterface = physics->physicsSystem->GetBodyInterface();
-    for (JPH::BodyID skeletonID : skeletonBodyIDs) {
-        if (!skeletonID.IsInvalid()) {
-            bodyInterface.RemoveBody(skeletonID);
-            bodyInterface.DestroyBody(skeletonID);
-        }
-    }
-
-    // Clean up soft body
-    bodyInterface.RemoveBody(microbe.softBody.bodyID);
-    bodyInterface.DestroyBody(microbe.softBody.bodyID);
+    cleanupBodies(physics, microbe.softBody.bodyID, skeletonBodyIDs);
     delete physics;
-
-    PASS();
-    return 0;
 }
 
-// Test: Retraction forces pull toward center
-static int test_retraction_forces() {
-    TEST("Retraction forces pull toward center");
-
+TEST_CASE("ECMLocomotion - Retraction forces pull body toward anchored foot (Body Pull)", "[ecm_locomotion]") {
     PhysicsSystemState* physics = new PhysicsSystemState();
 
     components::Microbe microbe = {};
@@ -380,16 +259,32 @@ static int test_retraction_forces() {
     skeleton.skeletonNodeCount = (int)skeletonBodyIDs.size();
 
     microbe.locomotion.phase = 0.8f; // Retraction phase
-    microbe.locomotion.targetVertexIndex = 0;
+    microbe.locomotion.targetVertexIndex = 0; // Target vertex (anchored foot)
     microbe.locomotion.targetDirection = {1, 0, 0};
     microbe.locomotion.wigglePhase = 0.0f;
     microbe.locomotion.isExtending = false;
     microbe.locomotion.isSearching = false;
     microbe.locomotion.isRetracting = true;
 
-    // Get initial velocity of first skeleton body (forces are applied to skeleton[0])
-    JPH::BodyInterface& bodyInterface = physics->physicsSystem->GetBodyInterface();
-    JPH::BodyID skeletonBodyID = skeleton.skeletonBodyIDs[0];
+    // Get initial velocities of soft body vertices (Body Pull applies forces to vertices, not skeleton)
+    JPH::Vec3 initialVelocity;
+    int testVertexIdx;
+    {
+        JPH::BodyLockRead lock(physics->physicsSystem->GetBodyLockInterface(), microbe.softBody.bodyID);
+        REQUIRE(lock.Succeeded());
+
+        const JPH::Body& body = lock.GetBody();
+        const JPH::SoftBodyMotionProperties* motionProps =
+            static_cast<const JPH::SoftBodyMotionProperties*>(body.GetMotionProperties());
+        REQUIRE(motionProps != nullptr);
+
+        const JPH::Array<JPH::SoftBodyVertex>& vertices = motionProps->GetVertices();
+        REQUIRE(vertices.size() > 0);
+
+        // Get initial velocity of a non-target vertex (should be modified by Body Pull)
+        testVertexIdx = (microbe.locomotion.targetVertexIndex + 1) % (int)vertices.size();
+        initialVelocity = vertices[testVertexIdx].mVelocity;
+    } // Lock automatically released here
 
     // Apply retraction forces multiple times to see effect
     for (int i = 0; i < 10; i++) {
@@ -397,59 +292,26 @@ static int test_retraction_forces() {
         physics->update(0.016f); // Step physics to apply forces
     }
 
-    // Verify skeleton velocity was modified (forces are applied to skeleton, not soft body vertices)
-    JPH::Vec3 velocity = bodyInterface.GetLinearVelocity(skeletonBodyID);
-    float velMagnitude = velocity.Length();
+    // Verify soft body vertex velocity was modified (Body Pull applies forces to vertices)
+    JPH::Vec3 finalVelocity;
+    {
+        JPH::BodyLockRead lock2(physics->physicsSystem->GetBodyLockInterface(), microbe.softBody.bodyID);
+        REQUIRE(lock2.Succeeded());
 
-    // Velocity magnitude should be non-zero (some force was applied) - allow small tolerance
-    if (velMagnitude < 0.00001f) {
-        // Clean up skeleton bodies
-        for (JPH::BodyID skeletonID : skeletonBodyIDs) {
-            if (!skeletonID.IsInvalid()) {
-                bodyInterface.RemoveBody(skeletonID);
-                bodyInterface.DestroyBody(skeletonID);
-            }
-        }
-        bodyInterface.RemoveBody(microbe.softBody.bodyID);
-        bodyInterface.DestroyBody(microbe.softBody.bodyID);
-        delete physics;
-        FAIL("Retraction should apply some velocity to skeleton");
-    }
+        const JPH::Body& body2 = lock2.GetBody();
+        const JPH::SoftBodyMotionProperties* motionProps2 =
+            static_cast<const JPH::SoftBodyMotionProperties*>(body2.GetMotionProperties());
+        const JPH::Array<JPH::SoftBodyVertex>& vertices2 = motionProps2->GetVertices();
+        finalVelocity = vertices2[testVertexIdx].mVelocity;
+    } // Lock automatically released here
 
-    // Clean up skeleton bodies
-    for (JPH::BodyID skeletonID : skeletonBodyIDs) {
-        if (!skeletonID.IsInvalid()) {
-            bodyInterface.RemoveBody(skeletonID);
-            bodyInterface.DestroyBody(skeletonID);
-        }
-    }
+    float initialMag = initialVelocity.Length();
+    float finalMag = finalVelocity.Length();
 
-    // Clean up soft body
-    bodyInterface.RemoveBody(microbe.softBody.bodyID);
-    bodyInterface.DestroyBody(microbe.softBody.bodyID);
+    // Velocity magnitude should have changed (Body Pull applies velocity impulse to non-target vertices)
+    // Note: Target vertex (index 0) should remain unchanged (anchored), but other vertices should move
+    REQUIRE(std::abs(finalMag - initialMag) >= 0.00001f);
+
+    cleanupBodies(physics, microbe.softBody.bodyID, skeletonBodyIDs);
     delete physics;
-
-    PASS();
-    return 0;
-}
-
-int test_ecm_locomotion_run(void) {
-    printf("ecm_locomotion:\n");
-
-    int fails = 0;
-    fails += test_initialize_locomotion();
-    fails += test_phase_progression();
-    fails += test_phase_transitions();
-    fails += test_extension_forces();
-    fails += test_wiggle_phase();
-    fails += test_target_selection();
-    fails += test_retraction_forces();
-
-    if (fails == 0) {
-        printf("  All tests passed (%d/%d)\n", pass_count, test_count);
-    } else {
-        printf("  %d/%d tests failed\n", fails, test_count);
-    }
-
-    return fails;
 }

@@ -1,59 +1,57 @@
 #include "engine/util/rng.h"
+#include <catch2/catch_test_macros.hpp>
+#include <cmath>
 
-#include <stdio.h>
-
-static int expect_equal_u32(const char *label, uint32_t a, uint32_t b) {
-    if (a != b) {
-        printf("rng %s mismatch %u vs %u\n", label, a, b);
-        return 1;
-    }
-    return 0;
-}
-
-int test_rng_run(void) {
-    int fails = 0;
-    Rng a;
-    Rng b;
+TEST_CASE("RNG - deterministic sequence", "[rng]") {
+    Rng a, b;
     rng_seed(&a, 1234u);
     rng_seed(&b, 1234u);
 
-    for (int i = 0; i < 10; ++i) {
-        fails += expect_equal_u32("seq", rng_next_u32(&a), rng_next_u32(&b));
+    // Generate same sequence from same seed
+    for (int i = 0; i < 10; i++) {
+        REQUIRE(rng_next_u32(&a) == rng_next_u32(&b));
     }
+}
 
-    rng_seed(&a, 42u);
-    for (int i = 0; i < 100; ++i) {
-        int v = rng_range_i(&a, -3, 7);
-        if (v < -3 || v > 7) {
-            printf("rng range out of bounds %d\n", v);
-            fails++;
-            break;
-        }
+TEST_CASE("RNG - int range bounds", "[rng]") {
+    Rng rng;
+    rng_seed(&rng, 42u);
+
+    for (int i = 0; i < 100; i++) {
+        int v = rng_range_i(&rng, -3, 7);
+        REQUIRE(v >= -3);
+        REQUIRE(v <= 7);
     }
+}
 
-    rng_seed(&a, 0u);
-    if (a.state == 0u) {
-        printf("rng seed zero did not set default state\n");
-        fails++;
-    }
+TEST_CASE("RNG - seed zero sets default state", "[rng]") {
+    Rng rng;
+    rng_seed(&rng, 0u);
+    REQUIRE(rng.state != 0u);
+}
 
-    float f01 = rng_next_f01(&a);
-    if (f01 < 0.0f || f01 >= 1.0f) {
-        printf("rng f01 out of range %.4f\n", f01);
-        fails++;
-    }
+TEST_CASE("RNG - float 0-1 range", "[rng]") {
+    Rng rng;
+    rng_seed(&rng, 0u);
 
-    float fr = rng_range(&a, -2.0f, 2.0f);
-    if (fr < -2.0f || fr > 2.0f) {
-        printf("rng range out of bounds %.4f\n", fr);
-        fails++;
-    }
+    float f01 = rng_next_f01(&rng);
+    REQUIRE(f01 >= 0.0f);
+    REQUIRE(f01 < 1.0f);
+}
 
-    int same = rng_range_i(&a, 5, 4);
-    if (same != 5) {
-        printf("rng range_i expected min on inverted bounds\n");
-        fails++;
-    }
+TEST_CASE("RNG - float range bounds", "[rng]") {
+    Rng rng;
+    rng_seed(&rng, 0u);
 
-    return fails;
+    float fr = rng_range(&rng, -2.0f, 2.0f);
+    REQUIRE(fr >= -2.0f);
+    REQUIRE(fr <= 2.0f);
+}
+
+TEST_CASE("RNG - inverted int range returns min", "[rng]") {
+    Rng rng;
+    rng_seed(&rng, 0u);
+
+    int same = rng_range_i(&rng, 5, 4);
+    REQUIRE(same == 5);
 }

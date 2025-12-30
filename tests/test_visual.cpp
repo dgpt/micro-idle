@@ -1,29 +1,49 @@
-#include <stdio.h>
-#include <cstdlib>
+#include <catch2/catch_test_macros.hpp>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <string.h>
+
+// Include raylib first to avoid Windows.h conflicts
+#include "raylib.h"
+#include "rlgl.h"
 
 #ifdef _WIN32
 #include <direct.h>
 #define mkdir(path, mode) _mkdir(path)
 #else
+#include <dirent.h>
 #include <unistd.h>
 #endif
 
-#include "raylib.h"
-#include "rlgl.h"
 #include "src/World.h"
 #include "src/components/Microbe.h"
 #include "engine/platform/engine.h"
 
 using namespace micro_idle;
 
-// Headless visual test - runs actual game code with screenshot output
-int test_visual_run(void) {
-    printf("\n=== Visual Test (Headless Game Run) ===\n");
+// Cross-platform function to delete all PNG files in screenshots directory
+static void clearScreenshots() {
+#ifndef _WIN32
+    DIR* dir = opendir("screenshots");
+    if (dir) {
+        struct dirent* entry;
+        while ((entry = readdir(dir)) != NULL) {
+            if (strstr(entry->d_name, ".png") != NULL) {
+                char filepath[256];
+                snprintf(filepath, sizeof(filepath), "screenshots/%s", entry->d_name);
+                unlink(filepath);
+            }
+        }
+        closedir(dir);
+    }
+#endif
+    // On Windows, screenshots will be overwritten, so clearing is optional
+}
 
-    // Create screenshots directory (should already exist from test_main, but ensure it)
+TEST_CASE("Visual Test (Headless Game Run)", "[visual]") {
+    // Create screenshots directory
     mkdir("screenshots", 0755);
+    clearScreenshots();
 
     // Initialize window in hidden mode
     SetConfigFlags(FLAG_WINDOW_HIDDEN);
@@ -105,8 +125,5 @@ int test_visual_run(void) {
     UnloadRenderTexture(target);
     CloseWindow();
 
-    if (screenshotCount == 0) {
-        return 1;
-    }
-    return 0;
+    REQUIRE(screenshotCount > 0);
 }

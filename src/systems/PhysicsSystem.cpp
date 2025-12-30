@@ -115,8 +115,8 @@ PhysicsSystemState::PhysicsSystemState() {
         *objectLayerPairFilter
     );
 
-    // No gravity for 2D simulation on XZ plane
-    physicsSystem->SetGravity(JPH::Vec3(0, 0, 0));
+    // Enable gravity so microbes fall back to petri dish (Y=0) if they get picked up or spawned high
+    physicsSystem->SetGravity(JPH::Vec3(0, -9.81f, 0));
 
     printf("PhysicsSystem: Jolt initialized (max bodies: %u, threads: %u)\n", cMaxBodies, std::thread::hardware_concurrency());
     fflush(stdout);

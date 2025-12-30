@@ -78,8 +78,8 @@ JPH::BodyID SoftBodyFactory::CreateAmoeba(
     // Configure soft body physics properties for friction-based grip-and-stretch model
     creationSettings.mPressure = 5.0f;             // Reduced from 20.0f to allow pancake/drape over terrain
     creationSettings.mRestitution = 0.1f;          // Minimal bounciness - amoebas don't bounce
-    creationSettings.mFriction = 20.0f;            // MAX friction (20.0f) - skin must anchor to ground, not slide
-    creationSettings.mLinearDamping = 0.8f;        // Increased from 0.4f to kill momentum immediately when thrust stops
+    creationSettings.mFriction = 1.5f;             // Reduced from 8.0f/20.0f - allow sliding while maintaining control
+    creationSettings.mLinearDamping = 0.5f;        // Increased from 0.4f - improved damping for control
     creationSettings.mGravityFactor = 5.0f;         // Increased from 2.0f to force pancake/drape effect
     creationSettings.mNumIterations = 16;           // Higher for stability with soft constraints
     creationSettings.mUpdatePosition = true;       // Update body position

@@ -52,7 +52,6 @@ private:
 
     static void applyRetractionForces(
         components::Microbe& microbe,
-        components::InternalSkeleton& skeleton,
         PhysicsSystemState* physics,
         float dt
     );

@@ -43,6 +43,17 @@ FetchContent_Declare(flecs
 )
 FetchContent_MakeAvailable(flecs)
 
+# Catch2 (Testing Framework)
+include(FetchContent)
+FetchContent_Declare(Catch2
+    GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+    GIT_TAG v3.5.4
+)
+FetchContent_MakeAvailable(Catch2)
+
+# Enable CTest
+enable_testing()
+
 # Jolt Physics
 FetchContent_Declare(JoltPhysics
     GIT_REPOSITORY https://github.com/jrouwe/JoltPhysics.git
@@ -92,10 +103,8 @@ target_link_libraries(game PRIVATE
     Jolt
 )
 
-# Static link MinGW runtime (no DLL dependencies)
-if (WIN32)
-    target_link_options(game PRIVATE -static-libgcc -static-libstdc++ -static)
-endif()
+# Static link MinGW runtime (no DLL dependencies) - always for Windows cross-compilation
+target_link_options(game PRIVATE -static-libgcc -static-libstdc++ -static)
 
 target_compile_definitions(game PRIVATE
     $<$<BOOL:${DEV}>:DEV_MODE>
@@ -114,8 +123,8 @@ endif()
 # Tests Executable
 # ============================================================================
 
-add_executable(tests
-    tests/test_main.cpp
+# Common test sources
+set(TEST_SOURCES
     tests/test_time.cpp
     tests/test_rng.cpp
     tests/test_engine.cpp
@@ -139,6 +148,9 @@ add_executable(tests
     src/physics/Constraints.cpp
 )
 
+# Create test executable with Catch2
+add_executable(tests ${TEST_SOURCES})
+
 target_include_directories(tests PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}
 )
@@ -147,23 +159,33 @@ target_link_libraries(tests PRIVATE
     raylib
     flecs::flecs_static
     Jolt
+    Catch2::Catch2WithMain
 )
 
-# Static link MinGW runtime
-if (WIN32)
-    target_link_options(tests PRIVATE -static-libgcc -static-libstdc++ -static)
-endif()
+# Static link MinGW runtime and set console subsystem - always for Windows cross-compilation
+target_link_options(tests PRIVATE -static-libgcc -static-libstdc++ -static -Wl,-subsystem,console)
 
 target_compile_definitions(tests PRIVATE GRAPHICS_API_OPENGL_46)
 
-# Coverage for non-Windows builds
-if (NOT WIN32)
-    target_compile_options(tests PRIVATE --coverage -O0)
-    target_link_options(tests PRIVATE --coverage)
-endif()
+# Register tests with CTest
+include(CTest)
+# Include Catch2 test discovery (must be after FetchContent_MakeAvailable)
+list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
+include(Catch)
 
-# Math library on Linux
-if (UNIX AND NOT APPLE)
-    target_link_libraries(game PRIVATE m)
-    target_link_libraries(tests PRIVATE m)
-endif()
+# Bulk tests: discover normally with default 2 second timeout
+catch_discover_tests(tests
+    EXTRA_ARGS "--order rand"
+    PROPERTIES
+        TIMEOUT 2  # Default timeout for all discovered tests
+)
+
+# Visual/E2E tests: manually add with extended timeout
+# These tests are tagged [visual] and need more time for rendering/screenshots
+add_test(NAME visual::headless_game_run
+         COMMAND tests "[visual]")
+
+set_tests_properties(visual::headless_game_run PROPERTIES
+    TIMEOUT 20
+    LABELS "visual;e2e"
+)
