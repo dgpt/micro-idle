@@ -1,1 +1,0 @@
- "_deps/raylib-build/raylib/libraylib.a" "_deps/flecs-build/libflecs_static.a" JoltBuild/libJolt.a "_deps/catch2-build/src/libCatch2Main.a" -lopengl32 -lglu32 -lwinmm -lpthread -lwsock32 -lws2_32 "_deps/catch2-build/src/libCatch2.a" -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32 
