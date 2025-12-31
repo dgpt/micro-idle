@@ -54,7 +54,7 @@ namespace ConstraintPresets {
     constexpr ConstraintConfig RigidSphere = {0.0f, 0.1f};      // Very stiff, minimal stretch
     constexpr ConstraintConfig SoftSphere = {0.001f, 0.3f};     // Moderate softness
     constexpr ConstraintConfig JellySphere = {0.01f, 0.5f};     // Very soft, gel-like
-    constexpr ConstraintConfig Amoeba = {0.012f, 0.8f};         // Amoeba-like (gelled, higher damping for stability)
+    constexpr ConstraintConfig Amoeba = {0.008f, 0.8f};          // Amoeba-like (gelled, higher damping for stability)
 }
 
 } // namespace micro_idle

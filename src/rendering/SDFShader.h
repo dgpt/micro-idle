@@ -16,6 +16,10 @@ struct SDFShaderUniforms {
     int baseRadius{-1};
     int microbeColor{-1};
     int skeletonPoints{-1};  // Base uniform location for skeletonPoints[0]
+    int podDirs{-1};
+    int podExtents{-1};
+    int podAnchors{-1};
+    int podCount{-1};
 };
 
 // Load SDF membrane shader from standard paths
@@ -39,6 +43,11 @@ void setMicrobeUniforms(Shader shader, const SDFShaderUniforms& uniforms,
 // Set vertex positions uniform array (called for each microbe)
 void setVertexPositions(Shader shader, const SDFShaderUniforms& uniforms,
                         const Vector3* positions, int count);
+
+// Set pseudopod direction + extent arrays (optional)
+void setPodData(Shader shader, const SDFShaderUniforms& uniforms,
+                const Vector3* podDirs, const float* podExtents,
+                const Vector3* podAnchors, int podCount);
 
 } // namespace rendering
 } // namespace micro_idle

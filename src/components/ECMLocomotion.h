@@ -9,16 +9,25 @@ namespace components {
 // Cortex modeled as 1D ring with memory and local inhibitor fields
 struct ECMLocomotion {
     static constexpr int CortexSamples = 36;
+    static constexpr int MaxPods = 4;
+    struct Pod {
+        int index{-1};
+        float time{0.0f};
+        float duration{0.0f};
+        float angle{0.0f};
+        float extent{0.0f};
+        Vector3 anchorLocal{0.0f, 0.0f, 0.0f};
+        bool anchorSet{false};
+        int state{0}; // 0 = inactive, 1 = extending, 2 = holding, 3 = retracting
+    };
 
     float memory[CortexSamples]{};      // Excitability enhancer M(x,t)
     float inhibitor[CortexSamples]{};   // Local inhibitor L(x,t)
-    int activeIndex{-1};                // Active pseudopod cortex index
-    float activeTime{0.0f};             // Time since pseudopod started
-    float activeDuration{0.0f};         // Target duration for pseudopod
+    Pod pods[MaxPods]{};
     float idleTime{0.0f};               // Time since last pseudopod ended
-    float activeAngle{0.0f};            // Angle of active pseudopod
     float lastAngle{0.0f};              // Previous pseudopod angle
     int zigzagSign{1};                  // Alternates left/right bias
+    int orbitSign{1};                   // Orbit direction around cursor
     Vector3 targetDirection{0.0f, 0.0f, 1.0f}; // Current pseudopod direction
 };
 

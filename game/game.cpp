@@ -75,8 +75,10 @@ GameState* game_create(uint64_t seed) {
     }
 
     // Create amoebas inside boundaries with EC&M locomotion
-    state->world->createAmoeba({-2.8f, 1.5f, -1.4f}, 1.1f, (Color){120, 200, 170, 255});
-    state->world->createAmoeba({2.8f, 1.5f, 1.4f}, 0.95f, (Color){90, 180, 140, 255});
+    float spawnOffsetX = worldWidth * 0.25f;
+    float spawnOffsetZ = worldHeight * 0.25f;
+    state->world->createAmoeba({-spawnOffsetX, 1.5f, -spawnOffsetZ}, 0.28f, (Color){120, 200, 170, 255});
+    state->world->createAmoeba({spawnOffsetX, 1.5f, spawnOffsetZ}, 0.24f, (Color){90, 180, 140, 255});
 
     return state;
 }

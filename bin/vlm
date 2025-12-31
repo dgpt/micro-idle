@@ -1,28 +1,3 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/zsh
 
-IMG="$1"
-
-if [[ ! -f "$IMG" ]]; then
-  echo "Error: file not found: $IMG" >&2
-  exit 1
-fi
-
-IMG_B64="$(base64 -w 0 "$IMG")"
-
-payload="$(mktemp)"
-trap 'rm -f "$payload"' EXIT
-
-cat > "$payload" <<JSON
-{
-  "model": "ministral-3:14b",
-  "system": "You are viewing a screenshot from a video game. You must describe the image in detail, including the shapes, colors, and the lighting effects and determine if it meets the user's expectations. Keep your response concise.",
-  "prompt": "Describe the image. Does it appear to be an amoeba? It must depict multiple amoebas with incredibly realistic detail, including animation and physics simulation.",
-  "stream": false,
-  "images": ["$IMG_B64"]
-}
-JSON
-
-curl -s http://localhost:11434/api/generate \
-  -H "Content-Type: application/json" \
-  -d @"$payload" | jq -r '.response'
+SYSTEM_PROMPT="You are viewing a series of frames from a game. Describe what you see in detail." vlm screenshots/*

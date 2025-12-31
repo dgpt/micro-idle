@@ -86,8 +86,8 @@ SpawnRequest SpawnSystem::generateSpawnRequest(float worldWidth,
 
     Vector3 position = {x, y, z};
 
-    // Random radius (0.8 to 1.4)
-    float radius = 0.8f + ((float)rand() / RAND_MAX) * 0.6f;
+    // Random radius (0.2 to 0.35)
+    float radius = 0.2f + ((float)rand() / RAND_MAX) * 0.15f;
 
     // Random color (variation of green/blue for microbes)
     Color color = {

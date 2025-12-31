@@ -25,6 +25,10 @@ JPH::BodyID SoftBodyFactory::CreateAmoeba(
 
     // Step 1: Generate icosphere mesh
     IcosphereMesh mesh = GenerateIcosphere(subdivisions, radius);
+    float flatten = 0.25f;
+    for (int i = 0; i < mesh.vertexCount; i++) {
+        mesh.vertices[i].y *= flatten;
+    }
 
     // Step 2: Create SoftBodySharedSettings
     auto sharedSettings = new JPH::SoftBodySharedSettings();
@@ -52,11 +56,12 @@ JPH::BodyID SoftBodyFactory::CreateAmoeba(
     // Step 3: Create constraints automatically
     // Use Amoeba preset for soft, deformable behavior
     JPH::SoftBodySharedSettings::VertexAttributes vertexAttribs;
-    vertexAttribs.mCompliance = ConstraintPresets::Amoeba.compliance;
-    vertexAttribs.mShearCompliance = ConstraintPresets::Amoeba.compliance * 2.0f;  // Softer shear
-    vertexAttribs.mBendCompliance = ConstraintPresets::Amoeba.compliance * 3.0f;   // Softer bend
+    float compliance = ConstraintPresets::Amoeba.compliance * 2.2f;
+    vertexAttribs.mCompliance = compliance;
+    vertexAttribs.mShearCompliance = compliance * 1.2f;  // Allow shear for stretch
+    vertexAttribs.mBendCompliance = compliance * 1.3f;   // Resist folding tears
     vertexAttribs.mLRAType = JPH::SoftBodySharedSettings::ELRAType::EuclideanDistance;
-    vertexAttribs.mLRAMaxDistanceMultiplier = 1.08f;
+    vertexAttribs.mLRAMaxDistanceMultiplier = 1.7f;
 
     sharedSettings->CreateConstraints(&vertexAttribs, 1,
                                        JPH::SoftBodySharedSettings::EBendType::Distance);
@@ -74,12 +79,13 @@ JPH::BodyID SoftBodyFactory::CreateAmoeba(
     );
 
     // Configure soft body physics properties for a thick, gel-like response
-    creationSettings.mPressure = 1.2f;             // Lower pressure to suppress rebound spurts
+    creationSettings.mPressure = 0.4f;             // Lower pressure for more deformable membrane
     creationSettings.mRestitution = 0.0f;          // No bounce for gel-like response
-    creationSettings.mFriction = 1.6f;             // Grip without locking
-    creationSettings.mLinearDamping = 3.0f;        // Strong damping for gel-like response
-    creationSettings.mGravityFactor = 1.4f;        // Heavier to keep contact with substrate
-    creationSettings.mNumIterations = 20;          // Stability for stiffer constraints
+    creationSettings.mFriction = 1.8f;             // Grip for crawling without locking motion
+    creationSettings.mLinearDamping = 2.4f;        // Damping for gel-like response
+    creationSettings.mGravityFactor = 2.2f;        // Heavier to keep contact with substrate
+    creationSettings.mNumIterations = 24;          // Stability for stiffer constraints
+    creationSettings.mMaxLinearVelocity = std::max(3.0f, radius * 9.0f);
     creationSettings.mUpdatePosition = true;       // Update body position
     creationSettings.mMakeRotationIdentity = true; // Bake rotation into vertices
     creationSettings.mAllowSleeping = false;       // Keep always active for gameplay

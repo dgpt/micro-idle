@@ -240,13 +240,31 @@ void World::render(Camera3D camera, float alpha, bool renderToTexture) {
 }
 
 void World::handleInput(Camera3D camera, float dt, int screen_w, int screen_h) {
-    // Input is now handled by InputSystem in OnUpdate phase
-    // This method is kept for compatibility but does nothing
-    // InputSystem polls Raylib and updates InputState singleton automatically
-    (void)camera;
     (void)dt;
     (void)screen_w;
     (void)screen_h;
+
+    auto input = world.get_mut<components::InputState>();
+    if (!input) {
+        return;
+    }
+
+    Vector2 mouse = GetMousePosition();
+    Ray ray = GetMouseRay(mouse, camera);
+    float denom = ray.direction.y;
+    if (fabsf(denom) > 0.0001f) {
+        float t = -ray.position.y / denom;
+        if (t >= 0.0f) {
+            input->mouseWorld = {
+                ray.position.x + ray.direction.x * t,
+                0.0f,
+                ray.position.z + ray.direction.z * t
+            };
+            input->mouseWorldValid = true;
+            return;
+        }
+    }
+    input->mouseWorldValid = false;
 }
 
 void World::renderUI(int screen_w, int screen_h) {

@@ -12,12 +12,16 @@ uniform vec3 skeletonPoints[64];
 uniform int pointCount;
 uniform float baseRadius;
 uniform float time;
+uniform vec3 podDirs[4];
+uniform float podExtents[4];
+uniform vec3 podAnchors[4];
+uniform int podCount;
 
 out vec4 finalColor;
 
-const int MAX_STEPS = 80;
+const int MAX_STEPS = 128;
 const float MAX_DIST = 45.0;
-const float SURF_DIST = 0.005;
+const float FLATTEN = 2.0;
 
 float sdMembrane(vec3 p);
 
@@ -30,11 +34,6 @@ vec3 gSideDir = vec3(0.0, 0.0, 1.0);
 float gSideStrength = 0.0;
 
 // Smooth minimum for organic blending
-float smin(float a, float b, float k) {
-    float h = max(k - abs(a - b), 0.0) / k;
-    return min(a, b) - h * h * h * k * (1.0 / 6.0);
-}
-
 float sdCapsule(vec3 p, vec3 a, vec3 b, float r) {
     vec3 pa = p - a;
     vec3 ba = b - a;
@@ -108,55 +107,107 @@ float sdMembrane(vec3 p) {
         return d;
     }
 
-    float pointRadius = baseRadius * 0.65;
-    float smoothK = pointRadius * 0.8;
+    float pointRadius = baseRadius * 0.6;
+    float softK = 2.0 / max(pointRadius, 0.001);
 
+    vec3 pFlat = vec3(p.x, p.y * FLATTEN, p.z);
     vec3 warp = vec3(
-        fbm(p * 0.6 + vec3(1.7, 2.3, 3.1) + time * 0.12),
-        fbm(p * 0.6 + vec3(4.2, 0.9, 2.0) + time * 0.1),
-        fbm(p * 0.6 + vec3(2.8, 3.7, 1.1) + time * 0.08)
+        fbm(pFlat * 0.55 + vec3(1.7, 2.3, 3.1) + time * 0.12),
+        fbm(pFlat * 0.55 + vec3(4.2, 0.9, 2.0) + time * 0.1),
+        fbm(pFlat * 0.55 + vec3(2.8, 3.7, 1.1) + time * 0.08)
     );
-    p += (warp - 0.5) * pointRadius * 0.2;
+    pFlat += (warp - 0.5) * pointRadius * 0.06;
 
+    float minD = 1e10;
     for (int i = 0; i < 64; i++) {
         if (i >= count) {
             break;
         }
-        float jitter = 0.88 + 0.18 * sin(dot(skeletonPoints[i], vec3(0.8, 1.3, 1.7)));
-        float sphereDist = length(p - skeletonPoints[i]) - pointRadius * jitter;
-        d = smin(d, sphereDist, smoothK);
+        float jitter = 0.95 + 0.05 * sin(dot(skeletonPoints[i], vec3(0.8, 1.3, 1.7)));
+        vec3 spFlat = vec3(skeletonPoints[i].x, skeletonPoints[i].y * FLATTEN, skeletonPoints[i].z);
+        float distFromCenter = length(skeletonPoints[i] - gCenter);
+        float distScale = clamp((distFromCenter - baseRadius * 0.5) / (baseRadius * 1.2), 0.0, 1.0);
+        float radiusScale = mix(0.95, 1.25, distScale);
+        float sphereDist = length(pFlat - spFlat) - pointRadius * jitter * radiusScale;
+        minD = min(minD, sphereDist);
     }
 
     vec3 q = p - gCenter;
-    float along = dot(q, gBiasDir);
-    vec3 radial = q - gBiasDir * along;
-    float axialScale = 1.15;
-    vec3 qScaled = radial + gBiasDir * (along / axialScale);
-    float baseDist = length(qScaled) - baseRadius * 1.05;
-    d = smin(d, baseDist, smoothK * 1.2);
+    vec3 qFlat = vec3(q.x, q.y * FLATTEN, q.z);
+    vec3 biasDirFlat = normalize(vec3(gBiasDir.x, gBiasDir.y * FLATTEN, gBiasDir.z));
+    float along = dot(qFlat, biasDirFlat);
+    vec3 radial = qFlat - biasDirFlat * along;
+    float axialScale = 1.2;
+    vec3 qScaled = radial + biasDirFlat * (along / axialScale);
+    float baseDist = length(qScaled) - baseRadius * 0.85;
+    minD = min(minD, baseDist);
 
-    float podBlend = clamp(gBiasStrength / (baseRadius * 0.4), 0.2, 1.0);
-    vec3 podStart = gCenter + gBiasDir * baseRadius * 0.15;
-    vec3 podEnd = gCenter + gBiasDir * baseRadius * (0.7 + 0.6 * podBlend);
-    float podRadius = baseRadius * mix(0.32, 0.48, podBlend);
-    float podDist = sdCapsule(p, podStart, podEnd, podRadius);
-    d = smin(d, podDist, smoothK * (1.05 + 0.35 * podBlend));
+    int podTotal = min(podCount, 4);
+    float podDists[4];
+    int podDistCount = 0;
+    bool usedPod = false;
+    for (int i = 0; i < 4; i++) {
+        if (i >= podTotal) {
+            break;
+        }
+        float extent = min(podExtents[i], baseRadius * 2.2);
+        if (extent <= 0.001) {
+            continue;
+        }
+        vec3 dir = normalize(podDirs[i]);
+        float tipScale = clamp(extent / baseRadius, 0.0, 1.3);
+        float tipRadius = baseRadius * (0.06 + 0.05 * tipScale);
+        vec3 anchor = podAnchors[i];
+        vec3 tipStart = vec3(anchor.x, anchor.y * FLATTEN, anchor.z);
+        vec3 tipEnd = tipStart + vec3(dir.x, dir.y * FLATTEN, dir.z) * extent;
+        float tipDist = sdCapsule(pFlat, tipStart, tipEnd, tipRadius);
+        podDists[podDistCount++] = tipDist;
+        minD = min(minD, tipDist);
+        usedPod = true;
+    }
 
-    float tipBlend = clamp(gTipStrength / (baseRadius * 0.9), 0.2, 1.0);
-    vec3 tipStart = gCenter + gTipDir * baseRadius * 0.25;
-    vec3 tipEnd = gCenter + gTipDir * baseRadius * (0.8 + 0.7 * tipBlend);
-    float tipRadius = baseRadius * mix(0.28, 0.42, tipBlend);
-    float tipDist = sdCapsule(p, tipStart, tipEnd, tipRadius);
-    d = smin(d, tipDist, smoothK * (0.95 + 0.3 * tipBlend));
+    float fallbackDist = 0.0;
+    bool hasFallback = false;
+    if (!usedPod) {
+        float tipExtent = max(gTipStrength * 0.7, baseRadius * 0.4);
+        float tipScale = clamp((tipExtent / baseRadius - 0.5) / 1.2, 0.0, 1.0);
+        float tipRadius = baseRadius * (0.18 + 0.12 * tipScale);
+        vec3 tipEnd = gCenter + gTipDir * tipExtent;
+        fallbackDist = sdCapsule(pFlat,
+                                 vec3(gCenter.x, gCenter.y * FLATTEN, gCenter.z),
+                                 vec3(tipEnd.x, tipEnd.y * FLATTEN, tipEnd.z),
+                                 tipRadius);
+        minD = min(minD, fallbackDist);
+        hasFallback = true;
+    }
 
-    float sideBlend = clamp(gSideStrength / (baseRadius * 0.6), 0.0, 1.0);
-    vec3 sideStart = gCenter + gSideDir * baseRadius * 0.12;
-    vec3 sideEnd = gCenter + gSideDir * baseRadius * (0.5 + 0.45 * sideBlend);
-    float sideRadius = baseRadius * mix(0.2, 0.34, sideBlend);
-    float sideDist = sdCapsule(p, sideStart, sideEnd, sideRadius);
-    d = smin(d, sideDist, smoothK * (0.9 + 0.3 * sideBlend));
+    float sumExp = exp(-softK * (baseDist - minD));
+    for (int i = 0; i < 64; i++) {
+        if (i >= count) {
+            break;
+        }
+        float jitter = 0.95 + 0.05 * sin(dot(skeletonPoints[i], vec3(0.8, 1.3, 1.7)));
+        vec3 spFlat = vec3(skeletonPoints[i].x, skeletonPoints[i].y * FLATTEN, skeletonPoints[i].z);
+        float distFromCenter = length(skeletonPoints[i] - gCenter);
+        float distScale = clamp((distFromCenter - baseRadius * 0.5) / (baseRadius * 1.2), 0.0, 1.0);
+        float radiusScale = mix(0.95, 1.25, distScale);
+        float sphereDist = length(pFlat - spFlat) - pointRadius * jitter * radiusScale;
+        sumExp += exp(-softK * (sphereDist - minD));
+    }
+    for (int i = 0; i < podDistCount; i++) {
+        sumExp += exp(-softK * (podDists[i] - minD));
+    }
+    if (hasFallback) {
+        sumExp += exp(-softK * (fallbackDist - minD));
+    }
 
-    float bump = (fbm(p * 1.4 + time * 0.15) - 0.5) * pointRadius * 0.22;
+    if (sumExp > 0.0) {
+        d = minD - log(sumExp) / softK;
+    } else {
+        d = minD;
+    }
+
+    float bump = (fbm(pFlat * 0.9 + time * 0.08) - 0.5) * pointRadius * 0.02;
     return d + bump;
 }
 
@@ -234,16 +285,18 @@ void main()
     gSideDir = sideDist > 0.001 ? sideDir : fallbackSide;
     gSideStrength = sideDist;
 
+    float surfDist = max(0.003, baseRadius * 0.02);
     float t = 0.0;
     float hit = -1.0;
     for (int i = 0; i < MAX_STEPS; i++) {
         vec3 p = ro + rd * t;
         float d = sdMembrane(p);
-        if (d < SURF_DIST) {
+        if (d < surfDist) {
             hit = t;
             break;
         }
-        t += d;
+        float step = clamp(d * 0.5, surfDist * 0.5, 1.0);
+        t += step;
         if (t > MAX_DIST) {
             break;
         }
@@ -258,7 +311,6 @@ void main()
     vec3 lightDir = normalize(vec3(0.45, 0.85, 0.25));
     vec3 fillDir = normalize(vec3(-0.35, 0.65, -0.65));
     vec3 viewDir = normalize(viewPos - p);
-
     float wrap = 0.35;
     float shadow = pow(softShadow(p + n * 0.01, lightDir, 4.0), 1.35);
     float diff = clamp((dot(n, lightDir) + wrap) / (1.0 + wrap), 0.0, 1.0) * shadow;
