@@ -9,6 +9,7 @@ struct WorldState {
     float worldHeight{50.0f};  // Current world height (accounts for 32px margin)
     int screenWidth{1280};      // Current screen width
     int screenHeight{720};      // Current screen height
+    bool spawnEnabled{true};    // Allow SpawnSystem to create new microbes
 };
 
 } // namespace components

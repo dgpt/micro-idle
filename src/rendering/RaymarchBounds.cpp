@@ -5,6 +5,7 @@ namespace micro_idle {
 namespace rendering {
 
 float calculateBoundRadius(float baseRadius, float multiplier) {
+    // Conservative bound based on base radius with safety multiplier
     return baseRadius * multiplier;
 }
 

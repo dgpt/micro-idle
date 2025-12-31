@@ -25,4 +25,7 @@ float game_get_microbe_volume(const GameState *game, int index);
 float game_get_microbe_radius(const GameState *game, int index);
 void game_get_microbe_position(const GameState *game, int index, float* x, float* y, float* z);
 
+// Debug helper - direct world render access
+void game_debug_render_world(const GameState *game, Camera3D camera, float alpha);
+
 #endif

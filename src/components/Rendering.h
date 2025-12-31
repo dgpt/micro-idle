@@ -14,19 +14,9 @@ struct RenderColor {
     Color color{WHITE};
 };
 
-struct RenderSphere {
-    float radius{1.0f};
-};
-
 // SDF rendering component - stores shader uniform data for raymarching
 struct SDFRenderComponent {
     Shader shader{0};                    // SDF shader (lazy loaded)
-    int shaderLocViewPos{-1};            // Uniform location for camera position
-    int shaderLocPointCount{-1};         // Uniform location for point count
-    int shaderLocBaseRadius{-1};         // Uniform location for base radius
-    int shaderLocMicrobeColor{-1};       // Uniform location for microbe color
-    int shaderLocSkeletonPoints[64]{-1}; // Uniform locations for skeleton points array
-    bool shaderLoaded{false};            // Whether shader has been loaded
     Vector3 vertexPositions[64];         // Cached vertex positions (updated each frame)
     int vertexCount{0};                   // Number of vertices
 };

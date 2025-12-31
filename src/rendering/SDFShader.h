@@ -11,10 +11,11 @@ namespace rendering {
 
 struct SDFShaderUniforms {
     int viewPos{-1};
+    int time{-1};
     int pointCount{-1};
     int baseRadius{-1};
     int microbeColor{-1};
-    int skeletonPoints[64];  // Array of uniform locations for skeleton points
+    int skeletonPoints{-1};  // Base uniform location for skeletonPoints[0]
 };
 
 // Load SDF membrane shader from standard paths
@@ -27,6 +28,9 @@ bool initializeSDFUniforms(Shader shader, SDFShaderUniforms& uniforms);
 
 // Set camera position uniform (called each frame)
 void setCameraPosition(Shader shader, const SDFShaderUniforms& uniforms, Vector3 cameraPos);
+
+// Set time uniform (called each frame)
+void setTime(Shader shader, const SDFShaderUniforms& uniforms, float time);
 
 // Set per-microbe uniforms (called for each microbe)
 void setMicrobeUniforms(Shader shader, const SDFShaderUniforms& uniforms,

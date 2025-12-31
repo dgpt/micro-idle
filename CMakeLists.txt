@@ -142,6 +142,7 @@ endif()
 
 # Common test sources
 set(TEST_SOURCES
+    tests/test_flecs_reset.cpp
     tests/test_time.cpp
     tests/test_rng.cpp
     tests/test_engine.cpp
@@ -157,6 +158,7 @@ set(TEST_SOURCES
     tests/test_constraints.cpp
     tests/test_softbody_factory.cpp
     tests/test_ecm_locomotion.cpp
+    tests/test_sdf_render_system.cpp
     tests/test_microbe_integration.cpp
     engine/platform/engine.cpp
     engine/platform/time.cpp
@@ -210,6 +212,7 @@ catch_discover_tests(tests
     EXTRA_ARGS "--order rand"
     PROPERTIES
         TIMEOUT 2  # Default timeout for all discovered tests
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
 # Visual/E2E tests: manually add with extended timeout
@@ -220,4 +223,5 @@ add_test(NAME visual::headless_game_run
 set_tests_properties(visual::headless_game_run PROPERTIES
     TIMEOUT 20
     LABELS "visual;e2e"
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )

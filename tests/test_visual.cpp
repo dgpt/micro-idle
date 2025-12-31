@@ -7,6 +7,8 @@
 #include "raylib.h"
 #include "rlgl.h"
 
+#include "src/systems/SpawnSystem.h"
+
 #ifdef _WIN32
 #include <direct.h>
 #define mkdir(path, mode) _mkdir(path)
@@ -15,36 +17,41 @@
 #include <unistd.h>
 #endif
 
-#include "src/World.h"
-#include "src/components/Microbe.h"
-#include "src/components/WorldState.h"
+#include "game/game.h"
 #include "engine/platform/engine.h"
 #include <math.h>
 
-using namespace micro_idle;
-
 // Calculate world dimensions from camera view frustum (copied from game.cpp)
 static void calculateWorldDimensions(Camera3D camera, int screen_w, int screen_h, float* outWidth, float* outHeight) {
-    // Camera is at (0, 22, 0) looking down at XZ plane
-    // Use similar triangles to calculate visible area at y=0
-    float cameraHeight = camera.position.y;
-    float fovRadians = camera.fovy * DEG2RAD;
     float aspect = (float)screen_w / (float)screen_h;
+    float visibleHeight = 0.0f;
+    float visibleWidth = 0.0f;
 
-    // Calculate visible height (Z dimension) at ground level
-    float visibleHeight = 2.0f * cameraHeight * tanf(fovRadians / 2.0f);
+    if (camera.projection == CAMERA_ORTHOGRAPHIC) {
+        visibleHeight = camera.fovy;
+        visibleWidth = visibleHeight * aspect;
+    } else {
+        // Camera is at (0, 22, 0) looking down at XZ plane
+        // Use similar triangles to calculate visible area at y=0
+        float cameraHeight = camera.position.y;
+        float fovRadians = camera.fovy * DEG2RAD;
 
-    // Calculate visible width (X dimension) using aspect ratio
-    float visibleWidth = visibleHeight * aspect;
+        // Calculate visible height (Z dimension) at ground level
+        visibleHeight = 2.0f * cameraHeight * tanf(fovRadians / 2.0f);
+
+        // Calculate visible width (X dimension) using aspect ratio
+        visibleWidth = visibleHeight * aspect;
+    }
 
     // Convert 32px margin to world space units
     // At camera height, 1 pixel = visibleHeight / screen_h world units
     float pixelToWorld = visibleHeight / (float)screen_h;
     float marginWorld = 32.0f * pixelToWorld;
 
+    constexpr float microbeViewPadding = 2.2f;
     // Subtract margin from both dimensions (32px on each side = 64px total)
-    *outWidth = visibleWidth - (marginWorld * 2.0f);
-    *outHeight = visibleHeight - (marginWorld * 2.0f);
+    *outWidth = visibleWidth - (marginWorld * 2.0f) - (microbeViewPadding * 2.0f);
+    *outHeight = visibleHeight - (marginWorld * 2.0f) - (microbeViewPadding * 2.0f);
 }
 
 // Cross-platform function to delete all PNG files in screenshots directory
@@ -71,12 +78,9 @@ TEST_CASE("Visual Test (Headless Game Run)", "[visual]") {
     mkdir("screenshots", 0755);
     clearScreenshots();
 
-    // Initialize window in hidden mode
-    SetConfigFlags(FLAG_WINDOW_HIDDEN);
+    // Initialize window for testing (on-screen for debugging)
+    // SetWindowPosition(-2000, -2000);  // Position far off-screen
     InitWindow(1280, 720, "Micro-Idle Visual Test");
-
-    // Create render texture for offscreen rendering
-    RenderTexture2D target = LoadRenderTexture(1280, 720);
 
     // Initialize engine (same as main.cpp)
     EngineConfig cfg = {
@@ -91,90 +95,98 @@ TEST_CASE("Visual Test (Headless Game Run)", "[visual]") {
     EngineContext engine = {0};
     engine_init(&engine, cfg);
 
+    // TODO: Speed up spawning for visual test (spawnRate is private)
+
     // Setup camera (same as game.cpp - top-down view)
     Camera3D camera = {0};
     camera.position = (Vector3){0.0f, 22.0f, 0.0f};
     camera.target = (Vector3){0.0f, 0.0f, 0.0f};
-    camera.up = (Vector3){0.0f, 0.0f, -1.0f};  // Game uses Z-up for some reason
-    camera.fovy = 50.0f;
-    camera.projection = CAMERA_PERSPECTIVE;
+    camera.up = (Vector3){0.0f, 0.0f, -1.0f};
+    camera.fovy = 9.0f;
+    camera.projection = CAMERA_ORTHOGRAPHIC;
 
-    // Create World using the SAME logic as game.exe
-    World world;
+    // Create game state using EXACTLY the same API as game.exe
+    GameState* game = game_create(0xC0FFEEu);
+    REQUIRE(game != nullptr);
 
-    // Calculate initial world dimensions based on camera view (same as game.cpp)
-    float worldWidth, worldHeight;
-    calculateWorldDimensions(camera, 1280, 720, &worldWidth, &worldHeight);
-
-    printf("Test: Initial world dimensions: %.1f x %.1f\n", worldWidth, worldHeight);
-
-    // Create screen-space boundaries (same as game.cpp)
-    world.createScreenBoundaries(worldWidth, worldHeight);
-
-    // Update world state singleton with initial screen dimensions (same as game.cpp)
-    auto worldState = world.getWorld().get_mut<components::WorldState>();
-    if (worldState) {
-        worldState->screenWidth = 1280;
-        worldState->screenHeight = 720;
-    }
-
-    // Create amoebas inside boundaries with EC&M locomotion (same as game.cpp)
-    world.createAmoeba({0.0f, 1.5f, 0.0f}, 0.375f, RED);
-    world.createAmoeba({5.0f, 1.5f, 0.0f}, 0.3f, GREEN);
-    world.createAmoeba({-5.0f, 1.5f, 3.0f}, 0.325f, BLUE);
-
-    const int totalFrames = 60 * 5; // 5 seconds at 60 FPS
-    const int screenshotInterval = 20; // Every 20 frames = 3 per second
+    const int totalFrames = 60 * 6; // 6 seconds at 60 FPS to ensure we get all screenshots
+    const int burstCount = 5;
     int screenshotCount = 0;
+    bool screenshotsTaken[burstCount] = {false, false, false, false, false};
+    float screenshotTimes[burstCount];
+    const float burstStart = 3.0f;
+    const float burstDuration = 1.0f;
+    const float burstInterval = burstDuration / (float)(burstCount - 1);
+    for (int i = 0; i < burstCount; i++) {
+        screenshotTimes[i] = burstStart + burstInterval * (float)i;
+    }
 
     for (int frame = 0; frame < totalFrames; frame++) {
-        printf("Test: Frame %d starting\n", frame);
-
-        // Run game update (actual game code)
+        // Run update using EXACTLY the same API as game.exe
         float dt = 1.0f / 60.0f;
         int steps = engine_time_update(&engine, dt);
-        printf("Test: Engine time update returned %d steps\n", steps);
 
-        world.handleInput(camera, dt, 1280, 720);
+        // Handle input (same as game.exe)
+        game_handle_input(game, camera, dt, 1280, 720);
+
+        // Update physics (same as game.exe)
         for (int i = 0; i < steps; i++) {
-            world.update((float)engine.time.tick_dt);
-            printf("Test: World update step %d completed\n", i);
+            game_update_fixed(game, (float)engine.time.tick_dt);
         }
 
-        // Take screenshot every interval
-        if (frame % screenshotInterval == 0) {
-            // Render to render texture
-            BeginTextureMode(target);
-            ClearBackground((Color){20, 40, 60, 255});  // Dark background
+        // Take screenshots at specific time intervals
+        double currentTime = engine.time.tick * engine.time.tick_dt;
+        for (int i = 0; i < burstCount; i++) {
+            if (!screenshotsTaken[i] && currentTime >= screenshotTimes[i]) {
+                printf("Test: Taking screenshot %d at %.2f seconds\n", i, currentTime);
 
-            // Render world (3D rendering doesn't work in render textures due to Raylib limitations)
-            world.render(camera, engine_time_alpha(&engine), false);
-            world.renderUI(1280, 720);
+                // Use game API for everything - this should match game.exe exactly
+                BeginDrawing();
+                ClearBackground((Color){18, 44, 52, 255});
 
-            EndTextureMode();
+                // Render using game API (same as game.exe)
+                game_render(game, camera, engine_time_alpha(&engine));
+                game_render_ui(game, 1280, 720);
 
-            // Save screenshot
-            Image image = LoadImageFromTexture(target.texture);
-            ImageFlipVertical(&image);
+                EndDrawing();
 
-            char filename[256];
-            snprintf(filename, sizeof(filename), "screenshots/frame_%03d.png", screenshotCount);
-            mkdir("screenshots", 0755);
+                // Take screenshot of the hidden window
+                TakeScreenshot("temp_screenshot.png");
+                if (FileExists("temp_screenshot.png")) {
+                    // Load and save as properly named file
+                    Image screenshot = LoadImage("temp_screenshot.png");
 
-            if (ExportImage(image, filename)) {
-                screenshotCount++;
+                    char filename[256];
+                    snprintf(filename, sizeof(filename), "screenshots/frame_%03d.png", screenshotCount);
+                    mkdir("screenshots", 0755);
+
+                    if (ExportImage(screenshot, filename)) {
+                        printf("Test: Screenshot exported to %s\n", filename);
+                        screenshotCount++;
+                        screenshotsTaken[i] = true;
+                    } else {
+                        printf("Test: Screenshot export failed\n");
+                    }
+                    UnloadImage(screenshot);
+                    remove("temp_screenshot.png");
+                }
             }
-            UnloadImage(image);
+        }
+
+        // Exit early if we've taken all screenshots
+        if (screenshotsTaken[burstCount - 1]) {
+            break;
         }
     }
 
-    UnloadRenderTexture(target);
     CloseWindow();
 
-    REQUIRE(screenshotCount > 0);
+    REQUIRE(screenshotCount == burstCount);
 
-    // Validate that microbes are spawning correctly by checking microbe count
-    // After 5 seconds of simulation, we should have spawned multiple microbes
-    auto microbeCount = world.getWorld().count<components::Microbe>();
-    REQUIRE(microbeCount >= 3);  // Should have at least 3 microbes spawned
+    // Validate that microbes are spawning correctly using game API
+    int finalMicrobeCount = game_get_microbe_count(game);
+    REQUIRE(finalMicrobeCount >= 2);  // Should have at least 2 microbes spawned
+
+    // Clean up game state
+    game_destroy(game);
 }

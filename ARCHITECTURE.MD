@@ -251,10 +251,9 @@ PLAN.md                       # Implementation roadmap
 
 **Quality gates:**
 - All tests must pass before merge
-- Visual E2E test renders actual microbes in windowed mode and validates with screenshots
-- **Visual test validation**: Validates entity creation, physics simulation, and renders actual microbes with screenshots
-- *** bin/vlm <screenshot> *** to verify rendered content matches expectations
-- **Visual test runs in windowed mode** for proper 3D rendering validation
+- **Visual E2E test**: Uses exact same game API calls as game.exe (game_create, game_render, game_render_ui)
+- **Validation**: Confirms test produces identical output to game.exe using bin/vlm
+- **Test location**: Generates screenshots in /screenshots/ for direct comparison with game.exe behavior
 - Coverage target: **95%+** on `/src` modules
 - Zero compiler warnings on MinGW
 

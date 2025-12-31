@@ -1,20 +1,16 @@
 #include "PhysicsSystem.h"
-#include <stdio.h>
-#include <cstdarg>
 
 // Jolt uses callbacks for trace and asserts
 static void TraceImpl(const char* inFMT, ...) {
-    va_list list;
-    va_start(list, inFMT);
-    char buffer[1024];
-    vsnprintf(buffer, sizeof(buffer), inFMT, list);
-    va_end(list);
-    printf("Jolt: %s\n", buffer);
+    (void)inFMT;
 }
 
 #ifdef JPH_ENABLE_ASSERTS
 static bool AssertFailedImpl(const char* inExpression, const char* inMessage, const char* inFile, JPH::uint inLine) {
-    printf("Jolt Assert Failed: %s:%u: (%s) %s\n", inFile, inLine, inExpression, inMessage ? inMessage : "");
+    (void)inExpression;
+    (void)inMessage;
+    (void)inFile;
+    (void)inLine;
     return true; // Trigger breakpoint
 }
 #endif
@@ -55,7 +51,8 @@ bool ObjectVsBroadPhaseLayerFilterImpl::ShouldCollide(JPH::ObjectLayer inLayer1,
         case Layers::MOVING:
             return true; // Moving objects collide with everything
         case Layers::SKIN:
-            return inLayer2 == BroadPhaseLayers::NON_MOVING || inLayer2 == BroadPhaseLayers::SKELETON;
+            return inLayer2 == BroadPhaseLayers::NON_MOVING || inLayer2 == BroadPhaseLayers::SKELETON ||
+                   inLayer2 == BroadPhaseLayers::SKIN;
         case Layers::SKELETON:
             return inLayer2 == BroadPhaseLayers::SKIN; // Skeleton only collides with skin, ignores ground
         default:
@@ -72,7 +69,7 @@ bool ObjectLayerPairFilterImpl::ShouldCollide(JPH::ObjectLayer inObject1, JPH::O
         case Layers::MOVING:
             return true; // Moving collides with everything
         case Layers::SKIN:
-            return inObject2 == Layers::NON_MOVING || inObject2 == Layers::SKELETON;
+            return inObject2 == Layers::NON_MOVING || inObject2 == Layers::SKELETON || inObject2 == Layers::SKIN; // SKIN collides with SKIN for microbe-microbe collisions
         case Layers::SKELETON:
             return inObject2 == Layers::SKIN; // Skeleton only collides with skin, ignores ground
         default:
@@ -83,9 +80,6 @@ bool ObjectLayerPairFilterImpl::ShouldCollide(JPH::ObjectLayer inObject1, JPH::O
 
 // PhysicsSystemState implementation
 PhysicsSystemState::PhysicsSystemState() {
-    printf("PhysicsSystem: Initializing Jolt Physics...\n");
-    fflush(stdout);
-
     // Register allocation hook
     JPH::RegisterDefaultAllocator();
 
@@ -130,12 +124,9 @@ PhysicsSystemState::PhysicsSystemState() {
     // Enable gravity so microbes fall back to petri dish (Y=0) if they get picked up or spawned high
     physicsSystem->SetGravity(JPH::Vec3(0, -9.81f, 0));
 
-    printf("PhysicsSystem: Jolt initialized (max bodies: %u, threads: %u)\n", cMaxBodies, std::thread::hardware_concurrency());
-    fflush(stdout);
 }
 
 PhysicsSystemState::~PhysicsSystemState() {
-    printf("PhysicsSystem: Shutting down Jolt Physics\n");
     delete physicsSystem;
     delete objectLayerPairFilter;
     delete objectVsBroadPhaseFilter;
@@ -177,7 +168,6 @@ JPH::BodyID PhysicsSystemState::createSphere(JPH::Vec3 position, float radius, b
     // Create body
     JPH::Body* body = bodyInterface.CreateBody(bodySettings);
     if (!body) {
-        printf("PhysicsSystem: Failed to create sphere body\n");
         return JPH::BodyID();
     }
 
@@ -207,7 +197,6 @@ JPH::BodyID PhysicsSystemState::createCylinder(JPH::Vec3 position, float radius,
     // Create body
     JPH::Body* body = bodyInterface.CreateBody(bodySettings);
     if (!body) {
-        printf("PhysicsSystem: Failed to create cylinder body\n");
         return JPH::BodyID();
     }
 
@@ -237,7 +226,6 @@ JPH::BodyID PhysicsSystemState::createBox(JPH::Vec3 position, JPH::Vec3 halfExte
     // Create body
     JPH::Body* body = bodyInterface.CreateBody(bodySettings);
     if (!body) {
-        printf("PhysicsSystem: Failed to create box body\n");
         return JPH::BodyID();
     }
 

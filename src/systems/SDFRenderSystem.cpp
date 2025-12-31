@@ -10,41 +10,82 @@ namespace micro_idle {
 
 void SDFRenderSystem::registerSystem(flecs::world& world) {
     // System that renders microbes using SDF raymarching
-    // Runs in PostUpdate phase (final phase, after all simulation)
     world.system<const components::Microbe, const components::Transform, const components::SDFRenderComponent>("SDFRenderSystem")
         .kind(flecs::PostUpdate)
-        .each([](flecs::entity e, const components::Microbe& microbe, const components::Transform& transform, const components::SDFRenderComponent& sdf) {
-            if (sdf.vertexCount == 0 || sdf.shader.id == 0 || !sdf.shaderLoaded) {
-                return; // Skip if no vertices or shader not loaded
+        .each([&world](const components::Microbe& microbe,
+                       const components::Transform& transform,
+                       const components::SDFRenderComponent& sdf) {
+            const auto* cameraState = world.get<components::CameraState>();
+            if (!cameraState) {
+                return;
             }
 
-            // Calculate bounding sphere for the microbe using utility
-            Vector3 center = transform.position;
-            float boundRadius = rendering::calculateBoundRadius(microbe.stats.baseRadius);
+            if (sdf.vertexCount <= 0 || sdf.shader.id == 0) {
+                return;
+            }
 
-            // Begin shader mode
-            BeginShaderMode(sdf.shader);
+            int count = sdf.vertexCount;
+            if (count > 64) {
+                count = 64;
+            }
 
-            // Set shader uniforms using utility functions
-            // Note: Vertex positions are already set by UpdateSDFUniforms
-            // Camera position is set globally before rendering (see World::render)
-
-            // Build uniform struct from component (for compatibility)
             rendering::SDFShaderUniforms uniforms;
-            uniforms.viewPos = sdf.shaderLocViewPos;
-            uniforms.pointCount = sdf.shaderLocPointCount;
-            uniforms.baseRadius = sdf.shaderLocBaseRadius;
-            uniforms.microbeColor = sdf.shaderLocMicrobeColor;
-            for (int i = 0; i < 64; i++) {
-                uniforms.skeletonPoints[i] = sdf.shaderLocSkeletonPoints[i];
+            if (!rendering::initializeSDFUniforms(sdf.shader, uniforms)) {
+                return;
             }
 
-            rendering::setMicrobeUniforms(sdf.shader, uniforms, sdf.vertexCount,
-                                         microbe.stats.baseRadius, microbe.stats.color);
+            rendering::setCameraPosition(sdf.shader, uniforms, cameraState->position);
+            rendering::setTime(sdf.shader, uniforms, (float)GetTime());
+            rendering::setMicrobeUniforms(
+                sdf.shader,
+                uniforms,
+                count,
+                microbe.stats.baseRadius,
+                microbe.stats.color);
+            rendering::setVertexPositions(
+                sdf.shader,
+                uniforms,
+                sdf.vertexPositions,
+                count);
 
-            // Draw bounding sphere (the shader will raymarch inside it)
-            DrawSphere(center, boundRadius, WHITE);
+            Vector3 minPos = sdf.vertexPositions[0];
+            Vector3 maxPos = sdf.vertexPositions[0];
+            for (int i = 1; i < count; i++) {
+                const Vector3& p = sdf.vertexPositions[i];
+                minPos.x = fminf(minPos.x, p.x);
+                minPos.y = fminf(minPos.y, p.y);
+                minPos.z = fminf(minPos.z, p.z);
+                maxPos.x = fmaxf(maxPos.x, p.x);
+                maxPos.y = fmaxf(maxPos.y, p.y);
+                maxPos.z = fmaxf(maxPos.z, p.z);
+            }
 
+            Vector3 center = {
+                (minPos.x + maxPos.x) * 0.5f,
+                (minPos.y + maxPos.y) * 0.5f,
+                (minPos.z + maxPos.z) * 0.5f
+            };
+
+            constexpr float kPointRadiusScale = 0.65f;
+            constexpr float kWarpScale = 0.2f;
+            constexpr float kBumpScale = 0.22f;
+            constexpr float kJitterMax = 1.06f;
+            constexpr float kBasePaddingScale = 0.35f;
+            constexpr float kPseudopodPaddingScale = 0.9f;
+            float pointRadius = microbe.stats.baseRadius * kPointRadiusScale;
+            float padding = pointRadius * (kJitterMax + kWarpScale + kBumpScale) +
+                microbe.stats.baseRadius * (kBasePaddingScale + kPseudopodPaddingScale) + 0.05f;
+
+            float sizeX = (maxPos.x - minPos.x) + padding * 2.0f;
+            float sizeY = (maxPos.y - minPos.y) + padding * 2.0f;
+            float sizeZ = (maxPos.z - minPos.z) + padding * 2.0f;
+
+            BeginShaderMode(sdf.shader);
+            DrawCube(center,
+                     sizeX,
+                     sizeY,
+                     sizeZ,
+                     WHITE);
             EndShaderMode();
         });
 }

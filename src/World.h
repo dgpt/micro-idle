@@ -53,6 +53,10 @@ private:
     flecs::world world;
     Shader sdfMembraneShader;  // SDF raymarching shader for microbe membranes
     WorldBoundaries* boundaries;   // Screen boundaries (opaque)
+    RenderTexture renderTexture;   // For render-to-texture testing
+    flecs::entity onUpdatePipeline{};
+    flecs::entity onStorePipeline{};
+    flecs::entity postUpdatePipeline{};
 
     // System registration
     void registerComponents();

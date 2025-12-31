@@ -60,7 +60,6 @@ void DestructionSystem::destroyMicrobe(flecs::entity microbeEntity, flecs::world
     // Destroy the entity (FLECS will handle cleanup)
     microbeEntity.destruct();
 
-    printf("DestructionSystem: Destroyed microbe entity %llu, spawned resource\n", microbeEntity.id());
 }
 
 void DestructionSystem::registerSystem(flecs::world& world, PhysicsSystemState* physics) {

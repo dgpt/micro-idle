@@ -1,23 +1,22 @@
 #include "SDFShader.h"
-#include <cstring>
-#include <cstdio>
-
 namespace micro_idle {
 namespace rendering {
 
 Shader loadSDFMembraneShader() {
-    // Try paths relative to executable location
-    Shader shader = LoadShader("../shaders/sdf_membrane.vert", "../shaders/sdf_membrane.frag");
+    // Try multiple paths to find the shader files
+    const char* paths[][2] = {
+        {"../shaders/sdf_membrane.vert", "../shaders/sdf_membrane.frag"},
+        {"shaders/sdf_membrane.vert", "shaders/sdf_membrane.frag"},
+        {"../data/shaders/sdf_membrane.vert", "../data/shaders/sdf_membrane.frag"},
+        {"data/shaders/sdf_membrane.vert", "data/shaders/sdf_membrane.frag"}
+    };
 
-    if (shader.id == 0) {
-        // Try absolute path from project root
-        shader = LoadShader("shaders/sdf_membrane.vert", "shaders/sdf_membrane.frag");
-    }
+    Shader shader = {0};
 
-    if (shader.id == 0) {
-        printf("SDFShader: Failed to load shader from both paths\n");
-    } else {
-        printf("SDFShader: Loaded shader successfully\n");
+    for (int i = 0; i < 4 && shader.id == 0; i++) {
+        if (FileExists(paths[i][0]) && FileExists(paths[i][1])) {
+            shader = LoadShader(paths[i][0], paths[i][1]);
+        }
     }
 
     return shader;
@@ -28,32 +27,20 @@ bool initializeSDFUniforms(Shader shader, SDFShaderUniforms& uniforms) {
         return false;
     }
 
-    // Initialize array to -1
-    for (int i = 0; i < 64; i++) {
-        uniforms.skeletonPoints[i] = -1;
-    }
-
     // Get uniform locations
     uniforms.viewPos = GetShaderLocation(shader, "viewPos");
+    uniforms.time = GetShaderLocation(shader, "time");
     uniforms.pointCount = GetShaderLocation(shader, "pointCount");
     uniforms.baseRadius = GetShaderLocation(shader, "baseRadius");
     uniforms.microbeColor = GetShaderLocation(shader, "microbeColor");
+    uniforms.skeletonPoints = GetShaderLocation(shader, "skeletonPoints[0]");
 
-    // Get skeleton points array uniform locations
-    for (int i = 0; i < 64; i++) {
-        char uniformName[64];
-        snprintf(uniformName, sizeof(uniformName), "skeletonPoints[%d]", i);
-        uniforms.skeletonPoints[i] = GetShaderLocation(shader, uniformName);
-    }
-
-    // Check if critical uniforms were found
-    bool valid = (uniforms.pointCount >= 0 && uniforms.baseRadius >= 0);
-
-    if (!valid) {
-        printf("SDFShader: Warning - some required uniforms not found\n");
-    }
-
-    return valid;
+    // Check that critical uniforms were found
+    return uniforms.viewPos >= 0 &&
+           uniforms.pointCount >= 0 &&
+           uniforms.baseRadius >= 0 &&
+           uniforms.microbeColor >= 0 &&
+           uniforms.skeletonPoints >= 0;
 }
 
 void setCameraPosition(Shader shader, const SDFShaderUniforms& uniforms, Vector3 cameraPos) {
@@ -62,6 +49,14 @@ void setCameraPosition(Shader shader, const SDFShaderUniforms& uniforms, Vector3
     }
 
     SetShaderValue(shader, uniforms.viewPos, &cameraPos, SHADER_UNIFORM_VEC3);
+}
+
+void setTime(Shader shader, const SDFShaderUniforms& uniforms, float time) {
+    if (shader.id == 0 || uniforms.time < 0) {
+        return;
+    }
+
+    SetShaderValue(shader, uniforms.time, &time, SHADER_UNIFORM_FLOAT);
 }
 
 void setMicrobeUniforms(Shader shader, const SDFShaderUniforms& uniforms,
@@ -90,17 +85,20 @@ void setMicrobeUniforms(Shader shader, const SDFShaderUniforms& uniforms,
 
 void setVertexPositions(Shader shader, const SDFShaderUniforms& uniforms,
                         const Vector3* positions, int count) {
-    if (shader.id == 0 || positions == nullptr || count <= 0) {
+    if (shader.id == 0 || positions == nullptr || count <= 0 || uniforms.skeletonPoints < 0) {
         return;
     }
 
-    // Upload vertex positions to shader uniforms
-    for (int i = 0; i < count && i < 64; i++) {
-        if (uniforms.skeletonPoints[i] >= 0) {
-            float pos[3] = {positions[i].x, positions[i].y, positions[i].z};
-            SetShaderValue(shader, uniforms.skeletonPoints[i], pos, SHADER_UNIFORM_VEC3);
-        }
+    int clampedCount = count > 64 ? 64 : count;
+    float values[64 * 3];
+    for (int i = 0; i < clampedCount; i++) {
+        int base = i * 3;
+        values[base + 0] = positions[i].x;
+        values[base + 1] = positions[i].y;
+        values[base + 2] = positions[i].z;
     }
+
+    SetShaderValueV(shader, uniforms.skeletonPoints, values, SHADER_UNIFORM_VEC3, clampedCount);
 }
 
 } // namespace rendering

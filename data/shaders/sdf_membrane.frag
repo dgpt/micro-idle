@@ -258,7 +258,6 @@ void main()
     vec3 lightDir = normalize(vec3(0.45, 0.85, 0.25));
     vec3 fillDir = normalize(vec3(-0.35, 0.65, -0.65));
     vec3 viewDir = normalize(viewPos - p);
-
     float wrap = 0.35;
     float shadow = pow(softShadow(p + n * 0.01, lightDir, 4.0), 1.35);
     float diff = clamp((dot(n, lightDir) + wrap) / (1.0 + wrap), 0.0, 1.0) * shadow;

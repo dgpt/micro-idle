@@ -1,0 +1,150 @@
+SUMMARY OF: Cooper, Wingreen & Cox (2012)
+An Excitable Cortex and Memory Model Successfully Predicts New Pseudopod Dynamics
+
+============================================================
+CORE IDEA
+============================================================
+This paper introduces the Excitable Cortex & Memory (EC&M) model to explain how
+amoeboid cells (e.g. Dictyostelium discoideum) move persistently without external
+guidance. Cells extend pseudopods in an alternating left–right (zig-zag) pattern.
+The key discovery is that each pseudopod leaves behind a temporary, spatially
+diffusing cortical “memory” that increases local excitability, while simultaneously
+producing local and global inhibition. As a result, pseudopod placement is
+non‑Markovian and depends on the spatial and temporal history of previous
+pseudopods.
+
+============================================================
+MODEL GEOMETRY
+============================================================
+• Cell cortex modeled as a 1D circular domain (angle θ or arc-length x)
+• Pseudopods are discrete excitable bursts on the cortex
+• Cell motion is derived from active pseudopod directions
+
+============================================================
+STATE VARIABLES
+============================================================
+M(x,t) : Cortical memory (excitability enhancer)
+L(x,t) : Local inhibitor (refractory + lifetime control)
+G(t)   : Global inhibitor (binary, whole-cell)
+
+============================================================
+EQUATIONS GOVERNING PSEUDOPOD DYNAMICS
+============================================================
+
+(1) Pseudopod initiation rate
+
+C_start(x,t) =
+    ε * [ M(x,t)^3 / (1 + a L(x,t)) ] * [ 1 / (1 + b G(t)) ]
+
+• Cubic dependence on M creates excitable behavior
+• Local inhibitor L suppresses nearby pseudopods
+• Global inhibitor G suppresses all new pseudopods while one is active
+
+
+(2) Cortical memory evolution
+
+∂M/∂t =
+    k0
+  + k1 * P_pseudopod(x,t)
+  − M / τ_M
+  + D_M ∇²M
+
+• Memory accumulates where pseudopods were active
+• Memory decays slowly and diffuses along the cortex
+• This term creates directional persistence
+
+
+(3) Local inhibitor evolution
+
+∂L/∂t =
+    k_L * P_pseudopod(x,t)
+  − L / τ_L
+  + D_L ∇²L
+
+• Produces refractory period
+• Limits pseudopod lifetime
+• Decays faster than memory (τ_L << τ_M)
+
+
+(4) Pseudopod termination rate
+
+C_stop = μ * L^3
+
+• Cubic dependence yields realistic lifetime distributions
+
+
+============================================================
+CELL-LEVEL MOTION
+============================================================
+Cell centroid motion follows a persistent random walk derived from
+pseudopod directions.
+
+Mean squared displacement:
+
+⟨r²(t)⟩ =
+  2 v² τ_p [ t − τ_p (1 − e^(−t/τ_p)) ]
+
+• τ_p ≈ 3–9 minutes, matching experiments
+
+
+============================================================
+KEY BIOLOGICAL PREDICTIONS (ALL VERIFIED EXPERIMENTALLY)
+============================================================
+• Zig-zag probability increases with distance from parent pseudopod
+• Zig-zag peaks when parent and grandparent are ~90° apart
+• Children of non–zig-zagging parents zig-zag more often
+• Larger / longer-lived pseudopods create stronger memory
+• Zig-zag bias decays after ~30–40 seconds (memory lifetime)
+
+
+============================================================
+PARAMETERS (SIMULATION VALUES)
+============================================================
+k0   = 0.1 s⁻¹        (basal memory production)
+k1   = 1.4 s⁻¹        (memory production at pseudopods)
+τ_M  = 30 s           (memory lifetime)
+D_M  = 0.14 μm²/s     (memory diffusion)
+
+k_L  = 0.3 s⁻¹        (local inhibitor production)
+τ_L  = 2.33 s         (local inhibitor lifetime)
+D_L  = 0.1 μm²/s      (local inhibitor diffusion)
+
+ε    = 2.5e−5 s⁻¹ μm⁻¹ (pseudopod initiation scale)
+a    = 34             (local inhibition strength)
+b    = 11             (global inhibition strength)
+μ    = 1 s⁻¹          (termination rate scaling)
+
+
+============================================================
+IMPLICATIONS FOR OPENGL / SDF AMOEBA SIMULATION
+============================================================
+
+Represent cortex as:
+• Circular parameter space θ ∈ [0, 2π)
+• Fields M(θ), L(θ) stored as 1D textures or buffers
+
+Simulation loop:
+1. Diffuse and decay M and L (reaction–diffusion step)
+2. Spawn pseudopods probabilistically via C_start
+3. Terminate pseudopods via C_stop
+4. Update G globally if any pseudopod is active
+
+SDF Geometry:
+• Base cell: smooth implicit blob (circle / superellipse)
+• Pseudopods: time‑limited SDF lobes extruded along surface normal
+• L field suppresses nearby lobe creation
+• M field biases lobe placement toward previous sites
+
+Visual realism:
+• Memory M modulates membrane roughness / actin texture
+• Local inhibitor L creates visible refractory “smooth” zones
+• Global inhibition reduces simultaneous protrusions
+• Shape evolution is history‑dependent, not noise‑driven
+
+============================================================
+CONCLUSION
+============================================================
+The EC&M model shows that realistic amoeboid motion emerges from excitable
+dynamics plus spatial memory. This framework is directly translatable to SDF‑based
+OpenGL simulations, producing biologically faithful, persistent, zig‑zagging motion
+without scripting trajectories or forces.

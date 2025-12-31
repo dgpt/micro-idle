@@ -1,7 +1,9 @@
 #ifndef MICRO_IDLE_ECM_LOCOMOTION_SYSTEM_H
 #define MICRO_IDLE_ECM_LOCOMOTION_SYSTEM_H
 
+#include <flecs.h>
 #include "src/components/Microbe.h"
+#include "src/components/ECMLocomotion.h"
 #include "src/systems/PhysicsSystem.h"
 
 namespace micro_idle {
@@ -10,47 +12,52 @@ namespace micro_idle {
 // Implements biologically-grounded amoeba movement as described in README.md
 class ECMLocomotionSystem {
 public:
-    // EC&M cycle constants (from README.md) - public for initialization
-    static constexpr float CYCLE_DURATION = 120.0f; // 12-second cycle
-    static constexpr float EXTEND_PHASE = 0.33f;   // 0.0 - 0.33
-    static constexpr float SEARCH_PHASE = 0.67f;   // 0.33 - 0.67
-    static constexpr float RETRACT_PHASE = 1.0f;   // 0.67 - 1.0
-
-    // Update EC&M locomotion for one microbe
-    // Applies forces to internal skeleton rigid bodies (friction-based grip-and-stretch model)
-    static void update(
-        components::Microbe& microbe,
-        components::InternalSkeleton& skeleton,
-        PhysicsSystemState* physics,
-        float dt
-    );
+    // Register the EC&M locomotion system with FLECS
+    static void registerSystem(flecs::world& world, PhysicsSystemState* physics);
 
     // Initialize EC&M state for new microbe
-    static void initialize(components::ECMLocomotion& locomotion);
+    static void initialize(components::ECMLocomotion& locomotion, float seed);
 
 private:
+    static constexpr int CortexSamples = components::ECMLocomotion::CortexSamples;
 
-    // Force magnitudes (10x increase for dramatic visible deformation)
-    static constexpr float PSEUDOPOD_EXTENSION_FORCE = 150.0f;
-    static constexpr float WIGGLE_FORCE = 50.0f;
-    static constexpr float RETRACT_FORCE = 100.0f;
+    // EC&M parameters (scaled for real-time simulation)
+    static constexpr float K0 = 0.1f;
+    static constexpr float K1 = 1.4f;
+    static constexpr float TAU_M = 30.0f;
+    static constexpr float D_M = 0.14f;
+    static constexpr float K_L = 0.3f;
+    static constexpr float TAU_L = 2.33f;
+    static constexpr float D_L = 0.1f;
+    static constexpr float ECM_EPSILON = 1.0e-3f; // Scaled up from paper for visible motion
+    static constexpr float A = 34.0f;
+    static constexpr float B = 11.0f;
+    static constexpr float MU = 1.0f;
 
-    // Apply forces based on current phase (to skeleton rigid bodies)
-    static void applyExtensionForces(
+    // Motion tuning
+    static constexpr float MIN_PSEUDOPOD_DURATION = 0.9f;
+    static constexpr float MAX_PSEUDOPOD_DURATION = 2.0f;
+    static constexpr float START_COOLDOWN = 0.25f;
+    static constexpr float FORCE_MAGNITUDE = 8.0f;
+    static constexpr float CONTRACTION_MAGNITUDE = 5.0f;
+    static constexpr float BODY_FORCE = 120.0f;
+    static constexpr float FORCE_RAMP_TIME = 0.3f;
+    static constexpr float ZIGZAG_STRENGTH = 0.35f;
+
+    // System update function (called by FLECS)
+    static void update(
+        flecs::entity e,
         components::Microbe& microbe,
-        components::InternalSkeleton& skeleton,
+        components::ECMLocomotion& locomotion,
         PhysicsSystemState* physics,
         float dt
     );
 
-    static void applySearchForces(
-        components::Microbe& microbe,
-        components::InternalSkeleton& skeleton,
-        PhysicsSystemState* physics,
-        float dt
-    );
-
-    static void applyRetractionForces(
+    static void stepCortex(components::ECMLocomotion& locomotion, float dt);
+    static bool shouldStopPseudopod(const components::ECMLocomotion& locomotion, float dt);
+    static bool tryStartPseudopod(components::ECMLocomotion& locomotion, float dt);
+    static void applyPseudopodForces(
+        components::ECMLocomotion& locomotion,
         components::Microbe& microbe,
         PhysicsSystemState* physics,
         float dt

@@ -14,7 +14,6 @@ float SpawnSystem::spawnAccumulator = 0.0f;
 void SpawnSystem::registerSystem(flecs::world& world, World* worldInstance) {
     // System that spawns microbes based on spawn rate
     // Runs in OnUpdate phase (simulation phase)
-    printf("SpawnSystem: Registering spawn system (rate=%.1f/sec)\n", spawnRate);
 
     world.system("SpawnSystem")
         .kind(flecs::OnUpdate)
@@ -23,9 +22,6 @@ void SpawnSystem::registerSystem(flecs::world& world, World* worldInstance) {
 
             static int callCount = 0;
 
-            if (callCount < 20 || callCount % 30 == 0) {
-                printf("SpawnSystem [call %d]: dt=%.6f, spawnAcc=%.6f (BEFORE add)\n", callCount, dt, spawnAccumulator);
-            }
 
             spawnAccumulator += dt;
 
@@ -52,18 +48,19 @@ void SpawnSystem::registerSystem(flecs::world& world, World* worldInstance) {
 
             // Get world bounds from singleton
             auto worldState = it.world().get<components::WorldState>();
+            if (worldState && !worldState->spawnEnabled) {
+                return;
+            }
+
             float worldWidth = worldState ? worldState->worldWidth : 50.0f;
             float worldHeight = worldState ? worldState->worldHeight : 50.0f;
-            float spawnHeight = 3.0f;  // Spawn above ground (will fall and hit floor at y=0)
+            float spawnHeight = 1.5f;  // Spawn near ground for cohesive visuals
 
-            printf("SpawnSystem: Spawning %d microbes\n", spawnCount);
 
             // Queue spawn requests (will be executed after world.progress() to avoid readonly issues)
             for (int i = 0; i < spawnCount; i++) {
                 SpawnRequest request = generateSpawnRequest(worldWidth, worldHeight, spawnHeight);
                 worldInstance->spawnQueue.push_back(request);
-                printf("SpawnSystem: Queued microbe spawn at (%.1f, %.1f, %.1f), radius=%.1f\n",
-                       request.position.x, request.position.y, request.position.z, request.radius);
             }
 
             // CRITICAL: Flush deferred operations so entities are immediately created
@@ -85,18 +82,18 @@ SpawnRequest SpawnSystem::generateSpawnRequest(float worldWidth,
     float randZ = (float)rand() / RAND_MAX;
     float x = randX * 2.0f * halfWidth - halfWidth;
     float z = randZ * 2.0f * halfHeight - halfHeight;
-    float y = spawnHeight;  // Spawn above ground (will fall and hit floor)
+    float y = spawnHeight;
 
     Vector3 position = {x, y, z};
 
-    // Random radius (1.0 to 2.0)
-    float radius = 1.0f + ((float)rand() / RAND_MAX) * 1.0f;
+    // Random radius (0.8 to 1.4)
+    float radius = 0.8f + ((float)rand() / RAND_MAX) * 0.6f;
 
     // Random color (variation of green/blue for microbes)
     Color color = {
-        (unsigned char)(50 + (rand() % 100)),
-        (unsigned char)(150 + (rand() % 100)),
-        (unsigned char)(100 + (rand() % 100)),
+        (unsigned char)(90 + (rand() % 60)),
+        (unsigned char)(170 + (rand() % 60)),
+        (unsigned char)(110 + (rand() % 60)),
         255
     };
 

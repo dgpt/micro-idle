@@ -10,8 +10,8 @@
 #include <Jolt/Physics/Body/BodyInterface.h>
 #include <Jolt/Physics/Constraints/DistanceConstraint.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
-#include <stdio.h>
 #include <vector>
+#include <cmath>
 
 namespace micro_idle {
 
@@ -22,12 +22,9 @@ JPH::BodyID SoftBodyFactory::CreateAmoeba(
     int subdivisions,
     std::vector<JPH::BodyID>& outSkeletonBodyIDs
 ) {
-    printf("SoftBodyFactory: Creating amoeba (subdivisions=%d, radius=%.2f)\n", subdivisions, radius);
 
     // Step 1: Generate icosphere mesh
     IcosphereMesh mesh = GenerateIcosphere(subdivisions, radius);
-    printf("  Generated icosphere: %d vertices, %d triangles\n",
-           mesh.vertexCount, mesh.triangleCount);
 
     // Step 2: Create SoftBodySharedSettings
     auto sharedSettings = new JPH::SoftBodySharedSettings();
@@ -58,6 +55,8 @@ JPH::BodyID SoftBodyFactory::CreateAmoeba(
     vertexAttribs.mCompliance = ConstraintPresets::Amoeba.compliance;
     vertexAttribs.mShearCompliance = ConstraintPresets::Amoeba.compliance * 2.0f;  // Softer shear
     vertexAttribs.mBendCompliance = ConstraintPresets::Amoeba.compliance * 3.0f;   // Softer bend
+    vertexAttribs.mLRAType = JPH::SoftBodySharedSettings::ELRAType::EuclideanDistance;
+    vertexAttribs.mLRAMaxDistanceMultiplier = 1.08f;
 
     sharedSettings->CreateConstraints(&vertexAttribs, 1,
                                        JPH::SoftBodySharedSettings::EBendType::Distance);
@@ -65,7 +64,6 @@ JPH::BodyID SoftBodyFactory::CreateAmoeba(
     // Optimize the soft body for parallel execution
     sharedSettings->Optimize();
 
-    printf("  Created constraints and optimized\n");
 
     // Step 4: Create SoftBodyCreationSettings
     JPH::SoftBodyCreationSettings creationSettings(
@@ -75,13 +73,13 @@ JPH::BodyID SoftBodyFactory::CreateAmoeba(
         Layers::SKIN  // Skin layer: collides with ground and skeleton
     );
 
-    // Configure soft body physics properties for friction-based grip-and-stretch model
-    creationSettings.mPressure = 5.0f;             // Reduced from 20.0f to allow pancake/drape over terrain
-    creationSettings.mRestitution = 0.1f;          // Minimal bounciness - amoebas don't bounce
-    creationSettings.mFriction = 1.5f;             // Reduced from 8.0f/20.0f - allow sliding while maintaining control
-    creationSettings.mLinearDamping = 0.5f;        // Increased from 0.4f - improved damping for control
-    creationSettings.mGravityFactor = 5.0f;         // Increased from 2.0f to force pancake/drape effect
-    creationSettings.mNumIterations = 16;           // Higher for stability with soft constraints
+    // Configure soft body physics properties for a thick, gel-like response
+    creationSettings.mPressure = 1.2f;             // Lower pressure to suppress rebound spurts
+    creationSettings.mRestitution = 0.0f;          // No bounce for gel-like response
+    creationSettings.mFriction = 1.6f;             // Grip without locking
+    creationSettings.mLinearDamping = 3.0f;        // Strong damping for gel-like response
+    creationSettings.mGravityFactor = 1.4f;        // Heavier to keep contact with substrate
+    creationSettings.mNumIterations = 20;          // Stability for stiffer constraints
     creationSettings.mUpdatePosition = true;       // Update body position
     creationSettings.mMakeRotationIdentity = true; // Bake rotation into vertices
     creationSettings.mAllowSleeping = false;       // Keep always active for gameplay
@@ -93,20 +91,18 @@ JPH::BodyID SoftBodyFactory::CreateAmoeba(
     );
 
     if (bodyID.IsInvalid()) {
-        printf("  ERROR: Failed to create soft body\n");
         delete sharedSettings;
         return JPH::BodyID();
     }
 
-    printf("  Soft body created successfully (BodyID: %u)\n", bodyID.GetIndexAndSequenceNumber());
 
     // Step 6: Create internal rigid skeleton (Internal Motor model)
     // Skeleton nodes are rigid spheres inside the soft body that push against the skin
     // Skeleton collides with skin but ignores ground (friction-based locomotion)
     JPH::BodyInterface& bodyInterface = physics->physicsSystem->GetBodyInterface();
 
-    // Create 3-5 skeleton nodes positioned inside the soft body
-    int skeletonNodeCount = 3;  // Start with 3 nodes, can be increased for more complex behavior
+    // Internal skeleton disabled: EC&M forces now drive soft-body vertices directly
+    int skeletonNodeCount = 0;
     float skeletonRadius = radius * 0.15f;  // Skeleton nodes are smaller than soft body
     float skeletonSpacing = radius * 0.4f;   // Spacing between skeleton nodes
 
@@ -138,6 +134,8 @@ JPH::BodyID SoftBodyFactory::CreateAmoeba(
 
         // Lock Y axis for 2D simulation
         skeletonSettings.mAllowedDOFs = JPH::EAllowedDOFs::TranslationX | JPH::EAllowedDOFs::TranslationZ;
+        skeletonSettings.mLinearDamping = 0.8f;
+        skeletonSettings.mAngularDamping = 0.8f;
 
         // Create and add skeleton body
         JPH::Body* skeletonBody = bodyInterface.CreateBody(skeletonSettings);
@@ -145,11 +143,9 @@ JPH::BodyID SoftBodyFactory::CreateAmoeba(
             JPH::BodyID skeletonBodyID = skeletonBody->GetID();
             bodyInterface.AddBody(skeletonBodyID, JPH::EActivation::Activate);
             outSkeletonBodyIDs.push_back(skeletonBodyID);
-            printf("  Created skeleton node %d (BodyID: %u)\n", i, skeletonBodyID.GetIndexAndSequenceNumber());
         }
     }
 
-    printf("  Created %zu internal skeleton nodes\n", outSkeletonBodyIDs.size());
 
     return bodyID;
 }
@@ -182,19 +178,40 @@ int SoftBodyFactory::ExtractVertexPositions(
     uint32_t vertexCount = (uint32_t)vertices.size();
 
     int count = (int)vertexCount < maxPositions ? (int)vertexCount : maxPositions;
+    if (count <= 0) {
+        return 0;
+    }
 
     // Get the center of mass transform to convert from local to world space
     JPH::RVec3 comPos = body.GetCenterOfMassPosition();
     JPH::Quat comRot = body.GetRotation();
     JPH::RMat44 comTransform = JPH::RMat44::sRotationTranslation(comRot, comPos);
 
-    for (int i = 0; i < count; i++) {
-        // Transform from local space (relative to center of mass) to world space
-        JPH::Vec3 localPos = vertices[i].mPosition;
+    if ((int)vertexCount <= maxPositions) {
+        for (int i = 0; i < count; i++) {
+            // Transform from local space (relative to center of mass) to world space
+            JPH::Vec3 localPos = vertices[i].mPosition;
+            JPH::Vec3 worldPos = comTransform * localPos;
+            outPositions[i].x = worldPos.GetX();
+            outPositions[i].y = worldPos.GetY();
+            outPositions[i].z = worldPos.GetZ();
+        }
+    } else if (count == 1) {
+        JPH::Vec3 localPos = vertices[0].mPosition;
         JPH::Vec3 worldPos = comTransform * localPos;
-        outPositions[i].x = worldPos.GetX();
-        outPositions[i].y = worldPos.GetY();
-        outPositions[i].z = worldPos.GetZ();
+        outPositions[0].x = worldPos.GetX();
+        outPositions[0].y = worldPos.GetY();
+        outPositions[0].z = worldPos.GetZ();
+    } else {
+        float step = (float)(vertexCount - 1) / (float)(count - 1);
+        for (int i = 0; i < count; i++) {
+            int idx = (int)(i * step + 0.5f);
+            JPH::Vec3 localPos = vertices[idx].mPosition;
+            JPH::Vec3 worldPos = comTransform * localPos;
+            outPositions[i].x = worldPos.GetX();
+            outPositions[i].y = worldPos.GetY();
+            outPositions[i].z = worldPos.GetZ();
+        }
     }
 
     return count;

@@ -31,17 +31,6 @@ enum class MicrobeType {
     Bacteriophage
 };
 
-// EC&M (Excitable Cortex & Memory) locomotion state
-struct ECMLocomotion {
-    float phase;                // 0-1 cycle position in 12-second cycle
-    int targetVertexIndex;      // Which soft body vertex is extending as pseudopod
-    Vector3 targetDirection;    // Direction of pseudopod extension
-    float wigglePhase;          // For lateral wiggle motion
-    bool isExtending;           // True during extension phase
-    bool isSearching;           // True during search/wiggle phase
-    bool isRetracting;          // True during retraction phase
-};
-
 // Microbe statistics and properties
 struct MicrobeStats {
     float seed;                 // Procedural variation seed
@@ -70,7 +59,6 @@ struct Microbe {
     MicrobeType type;
     MicrobeStats stats;
     SoftBody softBody;          // Jolt soft body (physics simulation)
-    ECMLocomotion locomotion;   // EC&M behavior state
 };
 
 } // namespace components

@@ -1,320 +1,305 @@
 # Micro-Idle Implementation Plan
 
-**Last Updated**: Current session
-**Status**: In Progress - Phase 1 & 3 Core Systems Complete
+**Last Updated**: December 30, 2025
+**Status**: CRITICAL ISSUE - Rendering Pipeline Broken
+**Visual Validation**: ❌ FAIL - Shows geometric shapes, not organic SDF microbes
 
 ---
 
-## Current State Assessment
+## **CRITICAL ISSUE IDENTIFIED**
 
-### ✅ Implemented Components
+**Problem**: 3D rendering in World::render() produces black screens, but 2D rendering works in World::renderUI().
 
-1. **Core Infrastructure**
-   - ✅ FLECS world initialization (`src/World.cpp/h`)
-   - ✅ Jolt Physics integration (`src/systems/PhysicsSystem.cpp/h`)
-   - ✅ Fixed-step time accumulator (`engine/platform/time.cpp/h`)
-   - ✅ Basic engine loop (`engine/platform/engine.cpp/h`)
+**Root Cause**: OpenGL/Raylib context issue - DrawSphere and 3D functions don't render in World::render() context, but DrawCircle and 2D functions work in World::renderUI().
 
-2. **Components**
-   - ✅ `Transform.h` - Position, rotation, scale
-   - ✅ `Physics.h` - Jolt BodyID wrapper
-   - ✅ `Microbe.h` - Microbe types, stats, soft body, EC&M locomotion
-   - ✅ `Rendering.h` - Basic render components
-   - ✅ `Input.h` - Input state singleton
+**Evidence**:
+- 3D rendering (DrawSphere) in World::render() produces black screenshots
+- 2D rendering (DrawCircle) in World::renderUI() produces visible microbe circles
+- Microbe data and positions are correct
+- Rendering code executes but 3D output is invisible
+- UI text renders correctly, proving screenshot capture works
 
-3. **Physics Systems**
-   - ✅ `PhysicsSystem` - Jolt world management
-   - ✅ `SoftBodyFactory` - Icosphere generation and soft body creation
-   - ✅ `ECMLocomotionSystem` - EC&M algorithm implementation
-   - ✅ `Icosphere.cpp/h` - Icosphere mesh generation
-   - ✅ `Constraints.cpp/h` - Distance/volume constraints
-
-4. **Rendering**
-   - ✅ SDF shader files (`shaders/sdf_membrane.vert/frag`)
-   - ⚠️ SDF rendering logic exists but embedded in `World::render()` (needs refactoring)
-
-5. **Tests**
-   - ✅ Visual test framework (`tests/test_visual.cpp`)
-   - ✅ Physics tests (`test_icosphere.cpp`, `test_constraints.cpp`)
-   - ✅ System tests (`test_softbody_factory.cpp`, `test_ecm_locomotion.cpp`)
-
-### ⚠️ Partially Implemented / Needs Refactoring
-
-1. **Rendering Systems** (Architecture §7)
-   - ⚠️ SDF rendering exists in `World::render()` but should be `SDFRenderSystem`
-   - ⚠️ SDF uniform updates embedded in render, should be `UpdateSDFUniforms` system
-   - ⚠️ Transform sync embedded in `World::update()`, should be `TransformSyncSystem`
-
-2. **Input System** (Architecture §7)
-   - ⚠️ Input component exists but no dedicated `InputSystem` to poll Raylib → FLECS
-
-3. **Game Logic**
-   - ❌ Microbe spawning system
-   - ❌ Destruction/hover detection
-   - ❌ Resource system
-   - ❌ Progression system (DNA traits, nutrients, disinfection)
-
-### ❌ Missing Systems (Per Architecture)
-
-1. **Core Systems** (Architecture §7)
-   - ❌ `InputSystem.cpp/h` - Raylib → FLECS input capture
-   - ❌ `TransformSyncSystem.cpp/h` - Jolt → FLECS transform sync
-   - ❌ `UpdateSDFUniforms.cpp/h` - Physics → GPU data transport
-   - ❌ `SDFRenderSystem.cpp/h` - SDF raymarcher rendering
-
-2. **Rendering Utilities** (Architecture §4)
-   - ❌ `src/rendering/SDFShader.cpp/h` - Shader loading/management
-   - ❌ `src/rendering/RaymarchBounds.cpp/h` - Bounding volume generation
-
-3. **Game Systems**
-   - ❌ `SpawnSystem.cpp/h` - Procedural microbe generation
-   - ❌ `DestructionSystem.cpp/h` - Hover/click detection and destruction
-   - ❌ `ResourceSystem.cpp/h` - Resource drops and collection
-   - ❌ `ProgressionSystem.cpp/h` - DNA traits, nutrients, disinfection
-
-4. **Components**
-   - ❌ `ECMLocomotion.h` - Separate component (currently embedded in `Microbe`)
-   - ❌ `SDFRenderComponent.h` - Shader reference, uniform locations
-   - ❌ `Resource.h` - Resource types and amounts
-   - ❌ `Progression.h` - DNA traits, upgrades
-
-5. **Collision Requirements** (Architecture §7.4)
-   - ⚠️ Collision detection exists but needs verification:
-     - REQ-COLLISION-001: Microbes collide when surfaces overlap ✓ (Jolt handles)
-     - REQ-COLLISION-002: Soft and elastic response ⚠️ (needs material tuning)
-     - REQ-COLLISION-003: Smooth separation ⚠️ (needs verification)
-     - REQ-COLLISION-004: Collision radius matches visual size ⚠️ (needs verification)
+**Impact**: Cannot validate any visual changes with `bin/vlm` until basic rendering works
 
 ---
 
-## Implementation Roadmap
+## Current State Assessment (Accurate as of Dec 30, 2025)
 
-### Phase 1: Core System Refactoring (Current Priority)
+### ✅ **Implemented Core Systems** (Architecture Compliant)
 
-**Goal**: Separate concerns according to architecture, establish clean Input → Simulation → Render pipeline.
+1. **FLECS ECS Infrastructure**
+   - ✅ FLECS world initialization and management
+   - ✅ Component definitions: `Transform.h`, `Physics.h`, `Microbe.h`, `Input.h`, `Rendering.h`
+   - ✅ System registration pipeline with proper phase ordering
 
-#### 1.1 Extract Input System ✅
-- [x] Create `src/systems/InputSystem.cpp/h`
-- [x] Poll Raylib input (mouse, keyboard)
-- [x] Write to `InputState` singleton
-- [x] Register in `World::registerSystems()` (OnUpdate phase)
-- [ ] Test: Verify input state updates correctly
+2. **Physics Pipeline (Jolt Integration)**
+   - ✅ `PhysicsSystem` - Complete Jolt world management
+   - ✅ `SoftBodyFactory` - Icosphere soft body creation (32-64 vertices)
+   - ✅ `ECMLocomotionSystem` - EC&M algorithm for amoeba movement
+   - ✅ Physics utilities: `Icosphere.cpp/h`, `Constraints.cpp/h`
+   - ✅ Multi-threaded physics simulation
 
-#### 1.2 Extract Transform Sync System ✅
-- [x] Create `src/systems/TransformSyncSystem.cpp/h`
-- [x] Move transform sync logic from `World::update()` to system
-- [x] Handle both rigid bodies and soft bodies
-- [x] Register in OnStore phase (after physics, before render)
-- [ ] Test: Verify transforms sync correctly
+3. **FLECS Systems Architecture**
+   - ✅ `InputSystem` - Raylib input capture → FLECS
+   - ✅ `TransformSyncSystem` - Jolt → FLECS sync (OnStore phase)
+   - ✅ `UpdateSDFUniforms` - Physics vertex extraction → GPU (OnStore phase)
+   - ✅ `SDFRenderSystem` - Registered in PostUpdate phase (but bypassed)
 
-#### 1.3 Extract SDF Uniform Update System ✅
-- [x] Create `src/systems/UpdateSDFUniforms.cpp/h`
-- [x] Extract vertex positions from Jolt soft bodies
-- [x] Flatten to float array
-- [x] Update shader uniforms
-- [x] Register in OnStore phase (after TransformSync)
-- [ ] Test: Verify uniforms update correctly
+4. **Rendering Infrastructure**
+   - ✅ SDF shader files: `sdf_membrane.vert/frag`
+   - ✅ Rendering utilities: `SDFShader.cpp/h`, `RaymarchBounds.cpp/h`
+   - ✅ Shader loading and uniform management
 
-#### 1.4 Extract SDF Render System ✅
-- [x] Create `src/systems/SDFRenderSystem.cpp/h`
-- [x] Move SDF rendering logic from `World::render()` to system
-- [x] Query entities with `Microbe` + `Transform` components
-- [x] Draw bounding volumes, bind shader, render
-- [x] Register in PostUpdate phase
-- [ ] Test: Verify rendering works correctly
+5. **Game Logic Foundation**
+   - ✅ `SpawnSystem` - Procedural microbe generation with boundaries
+   - ✅ `DestructionSystem` - Click detection framework
+   - ✅ `ResourceSystem` - Resource drops and collection
+   - ✅ World boundaries with 32px margin, dynamic resizing
 
-#### 1.5 Create Rendering Utilities ✅
-- [x] Create `src/rendering/SDFShader.cpp/h` - Shader loading/management
-- [x] Create `src/rendering/RaymarchBounds.cpp/h` - Bounding volume generation
-- [x] Refactor `World` to use utilities
-- [x] Refactor `UpdateSDFUniforms` and `SDFRenderSystem` to use utilities
-- [x] Build: Verified compilation succeeds
-- [ ] Test: Verify shader loading and bounds calculation (needs visual test)
+6. **Testing Infrastructure**
+   - ✅ Visual test framework with screenshot validation
+   - ✅ Physics and system integration tests
+   - ✅ Headless test execution for development validation
 
-#### 1.6 Verify Phase Separation ⚠️
-- [x] Ensure Input phase runs first (OnUpdate) - InputSystem registered
-- [x] Ensure Simulation phase runs second (OnUpdate: Physics, EC&M, GameLogic) - Physics and EC&M run in update()
-- [x] Ensure Transform sync runs third (OnStore) - TransformSyncSystem registered
-- [x] Ensure Render phase runs last (PostUpdate) - SDFRenderSystem registered
-- [ ] Test: Verify phase ordering (needs testing)
+### ❌ **BROKEN: Rendering Pipeline** (Architecture Violation)
 
-**Status**: Core systems working! Phase separation implemented. Game logic systems fully functional: SpawnSystem creates and spawns microbes properly, DestructionSystem uses single-click detection, ResourceSystem collects resources. **CRITICAL BUG FIXED** - Microbes were not accumulating because FLECS deferred entity operations. Added `it.world().defer_end()` to SpawnSystem to flush deferred operations immediately after spawning. Microbes now persist and accumulate correctly. Boundaries work properly (32px margin, floor at y=0, dynamic resizing). All systems tested and working!
+**Issue**: World::render() performs manual geometric rendering instead of using SDFRenderSystem.
 
-**Note**: Currently rendering is done manually in `World::render()` for compatibility. Systems are registered and will run via `world.progress()`, but render() is called separately. Future refactoring could integrate render systems more tightly.
+**Impact**: Produces stylized geometric shapes instead of smooth organic microbes.
+
+**Required Fix**: Remove manual rendering from World::render(), ensure SDFRenderSystem handles all microbe rendering.
+
+### ⚠️ **Needs Verification: Collision Physics**
+
+**Status**: Implemented but unverified against requirements (Architecture §7.4)
+
+- REQ-COLLISION-001: Surface overlap collision ✅ (Jolt handles)
+- REQ-COLLISION-002: Soft elastic response ⚠️ (needs tuning/material verification)
+- REQ-COLLISION-003: Smooth separation ⚠️ (needs behavioral testing)
+- REQ-COLLISION-004: Visual size matches collision radius ⚠️ (needs measurement)
+
+### ❌ **Missing: Game Progression Systems**
+
+1. **DNA Traits System** - Prerequisite-based unlock tree
+2. **Nutrient Upgrades** - Scaling and multiplicative stacking
+3. **Disinfection Abilities** - Active/passive/idle player capabilities
+4. **Advanced Microbe Behaviors** - Membrane undulation, flagella waves, swarm coordination
+
+### ❌ **Missing: Advanced Components**
+
+- `ECMLocomotion.h` - Separate component (currently embedded in `Microbe`)
+- `SDFRenderComponent.h` - Shader reference and uniform locations
+- `Resource.h` - Biologically grounded resource types
+- `Progression.h` - DNA traits and upgrade state
 
 ---
 
-### Phase 2: Collision & Physics Verification
+## **IMMEDIATE PRIORITY: Fix 3D Rendering Context Issue**
 
-**Goal**: Ensure collision requirements are met (Architecture §7.4).
+**Goal**: Fix why DrawSphere doesn't work in World::render() but DrawCircle works in World::renderUI().
+
+**Success Criteria**: 3D microbe rendering appears in screenshots
+
+#### **Step 1: Isolate the Issue**
+- [x] Confirmed 2D rendering works in World::renderUI()
+- [x] Confirmed 3D rendering fails in World::render() - even render-to-texture approach doesn't work
+- [x] Root cause: OpenGL state corruption in World::render() context
+
+#### **Step 2: Fix Rendering Context**
+- [ ] Investigate Raylib's OpenGL state management between BeginDrawing/EndDrawing
+- [ ] Try rendering 3D scene in World::renderUI() after 2D elements
+- [ ] Test alternative approaches (multiple BeginDrawing/EndDrawing, different matrix setup)
+
+#### **Step 3: Restore Proper 3D Rendering**
+- [ ] Implement working 3D rendering solution
+- [ ] Test: Basic 3D shapes appear
+- [ ] Activate SDF raymarching for organic microbe visuals
+
+**Current Status**: Visual tests working with 2D microbe circles. 3D rendering blocked by OpenGL context issues.
+**Estimated Time**: 4-8 hours (Raylib OpenGL state management is complex)
+**Risk**: High - May require deep Raylib/OpenGL expertise or workaround approaches
+
+---
+
+## Implementation Roadmap (Post-Rendering Fix)
+
+### Phase 1: Core Architecture Verification
+
+**Goal**: Ensure all systems follow FLECS pipeline phases correctly.
+
+#### 1.1 Verify Phase Separation
+- [ ] Confirm Input → Simulation → Transform Sync → Render order
+- [ ] Test: Add debug logging to verify phase execution order
+- [ ] Ensure no cross-phase dependencies
+
+#### 1.2 Component Separation
+- [ ] Extract `ECMLocomotion.h` from `Microbe.h`
+- [ ] Create `SDFRenderComponent.h` with shader references
+- [ ] Test: Verify component queries work correctly
+
+#### 1.3 System Integration Testing
+- [ ] Run full integration test suite
+- [ ] Verify all systems work together without conflicts
+- [ ] Test: Visual test passes with SDF rendering
+
+**Success Criteria**: Clean architecture, all systems functional, SDF rendering active.
+
+---
+
+### Phase 2: Collision Physics Verification
+
+**Goal**: Meet all collision requirements (Architecture §7.4).
 
 #### 2.1 Material Tuning
 - [ ] Review Jolt material properties (friction, restitution)
 - [ ] Tune for soft, elastic, gel-like response
-- [ ] Test: Verify collision feels soft and elastic
+- [ ] Test: Verify REQ-COLLISION-002 (soft elastic response)
 
 #### 2.2 Collision Radius Verification
-- [ ] Measure visual size from SDF rendering
-- [ ] Compare with Jolt collision radius
-- [ ] Ensure they match (REQ-COLLISION-004)
-- [ ] Test: Visual test with collision overlay
+- [ ] Measure SDF visual bounds
+- [ ] Compare with Jolt collision shapes
+- [ ] Adjust to ensure REQ-COLLISION-004 (visual size matches)
+- [ ] Test: Visual collision overlay test
 
 #### 2.3 Smooth Separation Verification
-- [ ] Test collision scenarios
-- [ ] Verify microbes separate smoothly after collision
-- [ ] Test: Record collision behavior, verify smoothness
+- [ ] Test collision scenarios with SDF rendering
+- [ ] Verify REQ-COLLISION-003 (smooth separation)
+- [ ] Tune restitution if needed
 
-**Success Criteria**: All collision requirements met, visual tests pass.
-
----
-
-### Phase 3: Game Logic Foundation
-
-**Goal**: Implement core game loop mechanics (spawning, destruction, resources).
-
-#### 3.1 Microbe Spawning System ✅
-- [x] Create `src/systems/SpawnSystem.cpp/h`
-- [x] Procedural microbe generation based on spawn rate
-- [x] Spawn within screen boundaries
-- [x] Register in OnUpdate phase
-- [x] Build: Verified compilation succeeds
-- [ ] Test: Verify microbes spawn correctly (needs visual test)
-
-#### 3.2 Destruction System ✅
-- [x] Create `src/systems/DestructionSystem.cpp/h`
-- [x] Hover detection (mouse position → microbe collision) - placeholder implementation
-- [x] Click detection (mouse click → microbe destruction)
-- [x] Damage application
-- [x] Register in OnUpdate phase (after Input)
-- [x] Spawn resources on destruction
-- [x] Build: Verified compilation succeeds
-- [ ] Test: Verify hover/click detection works (needs proper ray casting)
-
-#### 3.3 Resource System ✅
-- [x] Create `src/components/Resource.h` - Resource types (Sodium, Glucose, etc.)
-- [x] Create `src/systems/ResourceSystem.cpp/h` - Resource drops and collection
-- [x] Drop resources on microbe destruction
-- [x] Collect resources (hover/click) - placeholder implementation
-- [x] Resource inventory singleton
-- [x] Register in OnUpdate phase
-- [x] Build: Verified compilation succeeds
-- [ ] Test: Verify resources drop and collect correctly (needs visual test)
-
-**Success Criteria**: Microbes spawn, can be destroyed, drop resources.
+**Success Criteria**: All collision requirements verified with visual tests.
 
 ---
 
-### Phase 4: Progression System
+### Phase 3: Complete Game Loop
 
-**Goal**: Implement DNA traits, nutrients, and disinfection (README §Progression).
+**Goal**: Full idle game mechanics (spawn → destroy → resources).
 
-#### 4.1 DNA Traits System
-- [ ] Create `src/components/Progression.h` - DNA trait tree
-- [ ] Create `src/systems/ProgressionSystem.cpp/h` - Trait unlocking
-- [ ] Each trait provides: resource + drop + structure + mechanic
-- [ ] Prerequisite-based tree
-- [ ] Test: Verify trait unlocking works
+#### 3.1 Destruction Mechanics
+- [ ] Implement proper ray casting for hover detection
+- [ ] Add click-to-destroy functionality
+- [ ] Test: Verify accurate microbe targeting
+
+#### 3.2 Resource System Completion
+- [ ] Implement collection mechanics
+- [ ] Add biologically grounded resource types
+- [ ] Test: Verify resource drops and collection
+
+#### 3.3 Spawn Rate Balancing
+- [ ] Tune spawn rates for idle gameplay
+- [ ] Add progression-based spawn variety
+- [ ] Test: Verify sustainable game pacing
+
+**Success Criteria**: Complete idle game loop functional.
+
+---
+
+### Phase 4: DNA Traits & Progression
+
+**Goal**: Implement core progression system (README §Progression).
+
+#### 4.1 DNA Traits Tree
+- [ ] Create prerequisite-based trait system
+- [ ] Each trait provides: resource + structure + mechanic
+- [ ] Implement trait unlocking logic
 
 #### 4.2 Nutrient Upgrades
-- [ ] Extend `ProgressionSystem` for nutrient upgrades
-- [ ] Scaling and multiplicative stacking
-- [ ] Test: Verify upgrades scale correctly
+- [ ] Add scaling and multiplicative stacking
+- [ ] Connect to resource collection
+- [ ] Balance upgrade costs and effects
 
-#### 4.3 Disinfection System
-- [ ] Create `src/systems/DisinfectionSystem.cpp/h`
-- [ ] Active abilities (bursts, beams, chains)
-- [ ] Passive effects (fields, pulses, debuffs)
-- [ ] Idle automation (autonomous killers, fever waves)
-- [ ] Test: Verify abilities work correctly
+#### 4.3 Disinfection Abilities
+- [ ] Implement active abilities (bursts, beams, chains)
+- [ ] Add passive effects (fields, pulses)
+- [ ] Create idle automation systems
 
-**Success Criteria**: Full progression system functional, traits unlock correctly.
+**Success Criteria**: Full progression loop functional.
 
 ---
 
 ### Phase 5: Advanced Microbe Behaviors
 
-**Goal**: Implement membrane undulation, flagella waves, and other behaviors (README §Behavioral Motion).
+**Goal**: Add realistic microbial motion and structures.
 
 #### 5.1 Membrane Undulation
-- [ ] Add undulation component
 - [ ] Implement wave-based deformation
 - [ ] Apply to soft body vertices
-- [ ] Test: Verify undulation looks correct
+- [ ] Test: Verify organic movement
 
-#### 5.2 Flagella Waves
-- [ ] Add flagella component
-- [ ] Implement wave propagation
-- [ ] Visual rendering of flagella
-- [ ] Test: Verify flagella waves correctly
+#### 5.2 Flagella & Appendages
+- [ ] Add flagella wave propagation
+- [ ] Implement pili twitching
+- [ ] Create extracellular filaments
 
-#### 5.3 Additional Behaviors
-- [ ] Pili twitching
-- [ ] Extracellular filament drift
-- [ ] Periodic signal pulses
-- [ ] Test: Verify all behaviors work
+#### 5.3 Swarm Behaviors
+- [ ] Add quorum sensing
+- [ ] Implement coordinated movement
+- [ ] Test: Verify group dynamics
 
-**Success Criteria**: All microbe behaviors implemented and working.
+**Success Criteria**: Microbes exhibit lifelike behaviors.
 
 ---
 
-### Phase 6: Advanced Features
+### Phase 6: Advanced Features & Polish
 
-**Goal**: Implement defenses, offenses, and synergies (README §Enemy Threats).
+**Goal**: Complete game with defenses, offenses, and synergies.
 
 #### 6.1 Defensive Structures
 - [ ] Capsules (damage mitigation)
 - [ ] Biofilms (armor + clustering)
 - [ ] Spores (near-invulnerability)
-- [ ] Test: Verify defenses work
 
 #### 6.2 Offensive Structures
-- [ ] Harpoon systems (burst damage)
-- [ ] Contact toxins (damage-over-time)
-- [ ] Swarm coordination (group buffs)
-- [ ] Test: Verify offenses work
+- [ ] Harpoon systems
+- [ ] Contact toxins
+- [ ] Swarm coordination
 
-#### 6.3 System Synergies
-- [ ] Ensure all systems work together
-- [ ] Test: Verify synergies work correctly
+#### 6.3 Game Balancing & Polish
+- [ ] Balance all systems
+- [ ] Add visual polish
+- [ ] Performance optimization
 
-**Success Criteria**: All advanced features implemented and working.
-
----
-
-## Development Practices
-
-Following ARCHITECTURE.MD §2:
-
-- ✅ **Root Cause Analysis**: Fix root causes, not symptoms
-- ✅ **Verification**: Build and test after every logical change
-- ✅ **Refactoring**: Continuously reduce complexity
-- ✅ **Algorithm Selection**: Replace inadequate algorithms, don't extend with special cases
-- ✅ **Problem-Solving**: Try alternatives, refactor until root cause found
-- ✅ **Code Quality**: Prioritize readability, eliminate unjustified complexity
-- ✅ **Testing**: All debugging via tests, no ad-hoc logging
+**Success Criteria**: Complete, balanced idle microbiology game.
 
 ---
 
-## Testing Strategy
+## Development Rules & Practices
 
-- **Unit Tests**: Each system has corresponding `test_*.cpp`
-- **Integration Tests**: Test system interactions
-- **Visual Tests**: Headless screenshot verification (`test_visual.cpp`)
-- **Coverage Target**: 95%+ on `/src` modules
+**MANDATORY** (Architecture §2 - Development Requirements):
 
----
+- ✅ **REQ-001**: Root cause analysis - fix causes, not symptoms
+- ✅ **REQ-002**: No compensatory mechanisms for design flaws
+- ✅ **REQ-003**: Reject fixes that don't address root causes
+- ✅ **REQ-004**: Build after every logical change
+- ✅ **REQ-005**: Execute tests to verify correctness
+- ✅ **REQ-006**: Confirm changes work before proceeding
+- ✅ **REQ-007**: Refactor to reduce complexity continuously
+- ✅ **REQ-008**: Maintain complexity neutrality or reduction
+- ✅ **REQ-009**: Eliminate code smells during development
+- ✅ **REQ-010**: Split files exceeding 1000 lines
+- ✅ **REQ-011**: Replace inadequate algorithms entirely
+- ✅ **REQ-012**: Use established libraries and techniques
+- ✅ **REQ-013**: Consult literature for algorithm selection
+- ✅ **REQ-014**: Try alternatives when approaches fail
+- ✅ **REQ-015**: Accept no persistent failures
+- ✅ **REQ-016**: Prioritize readability over cleverness
+- ✅ **REQ-017**: Justify complexity by requirements
+- ✅ **REQ-018**: Leave codebase cleaner than before
+- ✅ **REQ-019**: No debug code in production logic
 
-## Build & Verification
-
+**Build & Test Requirements**:
 - **Build**: `bin/build.sh` (cross-compile Windows .exe)
 - **Test**: `bin/test.sh` (run tests + coverage)
-- **Never run `game.exe` during development** - use `tests.exe` for verification
+- **Visual Validation**: `bin/vlm` must indicate suitable graphics
+- **Coverage Target**: 95%+ on `/src` modules
+- **Never run `game.exe`** during development - use `tests.exe`
 
 ---
 
-## Notes
+## Key Reminders
 
-- Current implementation has good foundation but needs refactoring for proper architecture
-- Priority: Phase 1 (core system refactoring) to establish clean pipeline
-- Then: Phase 2 (collision verification) to ensure requirements met
-- Then: Phases 3-6 (game logic and features) incrementally
+1. **Visual Validation Mandatory**: Every graphical change must be validated with `bin/vlm`
+2. **Architecture Compliance**: All changes must follow ARCHITECTURE.MD structure
+3. **Puppet Architecture**: Physics drives rendering, SDF shows organic deformation
+4. **Complexity Reduction**: Every change should simplify, not complicate
+5. **Test-Driven**: All verification through proper tests, no ad-hoc debugging
+6. **Root Cause Focus**: Address underlying issues, not surface symptoms

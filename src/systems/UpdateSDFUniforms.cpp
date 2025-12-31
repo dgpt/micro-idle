@@ -2,8 +2,6 @@
 #include "src/components/Microbe.h"
 #include "src/components/Rendering.h"
 #include "src/systems/SoftBodyFactory.h"
-#include "src/rendering/SDFShader.h"
-#include "raylib.h"
 
 namespace micro_idle {
 
@@ -12,7 +10,7 @@ void UpdateSDFUniforms::registerSystem(flecs::world& world, PhysicsSystemState* 
     // Runs in OnStore phase (after TransformSync, before rendering)
     world.system<components::Microbe, components::SDFRenderComponent>("UpdateSDFUniforms")
         .kind(flecs::OnStore)
-        .each([physics](flecs::entity e, components::Microbe& microbe, components::SDFRenderComponent& sdf) {
+        .each([physics](components::Microbe& microbe, components::SDFRenderComponent& sdf) {
             if (microbe.softBody.vertexCount == 0 || microbe.softBody.bodyID.IsInvalid()) {
                 sdf.vertexCount = 0;
                 return;
@@ -27,26 +25,6 @@ void UpdateSDFUniforms::registerSystem(flecs::world& world, PhysicsSystemState* 
             );
 
             sdf.vertexCount = count;
-
-            // Cache uniform locations on first run (if shader is loaded)
-            if (!sdf.shaderLoaded && sdf.shader.id != 0) {
-                rendering::SDFShaderUniforms uniforms;
-                if (rendering::initializeSDFUniforms(sdf.shader, uniforms)) {
-                    // Copy uniform locations to component
-                    sdf.shaderLocViewPos = uniforms.viewPos;
-                    sdf.shaderLocPointCount = uniforms.pointCount;
-                    sdf.shaderLocBaseRadius = uniforms.baseRadius;
-                    sdf.shaderLocMicrobeColor = uniforms.microbeColor;
-                    for (int i = 0; i < 64; i++) {
-                        sdf.shaderLocSkeletonPoints[i] = uniforms.skeletonPoints[i];
-                    }
-                    sdf.shaderLoaded = true;
-                }
-            }
-
-            // Don't set shader uniforms here - will be done during rendering
-            // Just cache the vertex positions in the component
-            // The rendering loop will set uniforms and draw immediately
         });
 }
 

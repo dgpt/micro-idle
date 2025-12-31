@@ -47,12 +47,12 @@ TEST_CASE("GameRender - Rendering with window (shader loads lazily)", "[game_ren
     camera.position = (Vector3){0.0f, 22.0f, 0.0f};
     camera.target = (Vector3){0.0f, 0.0f, 0.0f};
     camera.up = (Vector3){0.0f, 0.0f, -1.0f};
-    camera.fovy = 50.0f;
-    camera.projection = CAMERA_PERSPECTIVE;
+    camera.fovy = 9.0f;
+    camera.projection = CAMERA_ORTHOGRAPHIC;
 
     // Render a frame - shader should load during first render
     BeginDrawing();
-    ClearBackground((Color){10, 20, 30, 255});
+    ClearBackground((Color){18, 44, 52, 255});
     world.render(camera, 0.0f);
     world.renderUI(1280, 720);
     EndDrawing();

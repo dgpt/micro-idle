@@ -1,17 +1,27 @@
 #include "ECMLocomotionSystem.h"
 #include <cmath>
-#include <stdio.h>
+#include <cstdlib>
+#include <algorithm>
 #include <cstdint>
-#include <Jolt/Physics/SoftBody/SoftBodyMotionProperties.h>
-#include <Jolt/Physics/Body/BodyLockInterface.h>
-#include <Jolt/Physics/Body/Body.h>
 #include <Jolt/Physics/Body/BodyInterface.h>
+#include <Jolt/Physics/SoftBody/SoftBodyMotionProperties.h>
 
 namespace micro_idle {
 
-// Simple hash function to generate pseudo-random values from seed
+static float rand01() {
+    return (float)rand() / (float)RAND_MAX;
+}
+
+static float wrapAngle(float angle) {
+    if (angle > PI) {
+        angle = fmodf(angle + PI, 2.0f * PI) - PI;
+    } else if (angle < -PI) {
+        angle = fmodf(angle - PI, 2.0f * PI) + PI;
+    }
+    return angle;
+}
+
 static float hashToFloat(float seed, int iteration) {
-    // Simple multiplicative hash
     uint32_t hash = (uint32_t)(seed * 1000000.0f);
     hash = hash * 2654435761u + (uint32_t)iteration;
     hash = (hash ^ (hash >> 16)) * 0x85ebca6b;
@@ -20,171 +30,264 @@ static float hashToFloat(float seed, int iteration) {
     return (float)(hash % 10000) / 10000.0f;
 }
 
-void ECMLocomotionSystem::initialize(components::ECMLocomotion& locomotion) {
-    // NOTE: Initialization is now done in World.cpp using the microbe's unique seed
-    // This function is kept for compatibility but should not be called directly
-    // Each amoeba gets unique random values based on its seed field
-    locomotion.targetVertexIndex = 0;
+void ECMLocomotionSystem::initialize(components::ECMLocomotion& locomotion, float seed) {
+    float baseMemory = K0 * TAU_M;
+    for (int i = 0; i < CortexSamples; i++) {
+        locomotion.memory[i] = baseMemory;
+        locomotion.inhibitor[i] = 0.0f;
+    }
 
-    // Set phase flags based on initial phase
-    locomotion.isExtending = (locomotion.phase < EXTEND_PHASE);
-    locomotion.isSearching = (locomotion.phase >= EXTEND_PHASE && locomotion.phase < SEARCH_PHASE);
-    locomotion.isRetracting = (locomotion.phase >= SEARCH_PHASE);
+    locomotion.activeIndex = -1;
+    locomotion.activeTime = 0.0f;
+    locomotion.activeDuration = 0.0f;
+    locomotion.idleTime = START_COOLDOWN;
+
+    locomotion.lastAngle = hashToFloat(seed, 0) * 2.0f * PI;
+    locomotion.activeAngle = locomotion.lastAngle;
+    locomotion.zigzagSign = hashToFloat(seed, 1) < 0.5f ? -1 : 1;
+
+    locomotion.targetDirection = {cosf(locomotion.lastAngle), 0.0f, sinf(locomotion.lastAngle)};
+}
+
+void ECMLocomotionSystem::registerSystem(flecs::world& world, PhysicsSystemState* physics) {
+    world.system<components::Microbe, components::ECMLocomotion>("ECMLocomotionSystem")
+        .kind(flecs::OnUpdate)
+        .run([physics](flecs::iter& it) {
+            while (it.next()) {
+                auto microbes = it.field<components::Microbe>(0);
+                auto locomotions = it.field<components::ECMLocomotion>(1);
+
+                for (auto i : it) {
+                    update(it.entity(i), microbes[i], locomotions[i], physics, it.delta_time());
+                }
+            }
+        });
 }
 
 void ECMLocomotionSystem::update(
+    flecs::entity e,
     components::Microbe& microbe,
-    components::InternalSkeleton& skeleton,
+    components::ECMLocomotion& locomotion,
     PhysicsSystemState* physics,
     float dt
 ) {
-    components::ECMLocomotion& loco = microbe.locomotion;
+    (void)e;
+    (void)microbe;
+    stepCortex(locomotion, dt);
 
-    // Update cycle phase (0-1 over 12 seconds)
-    loco.phase += dt / CYCLE_DURATION;
-    if (loco.phase >= 1.0f) {
-        loco.phase -= 1.0f;
+    if (locomotion.activeIndex >= 0) {
+        locomotion.activeTime += dt;
+        applyPseudopodForces(locomotion, microbe, physics, dt);
 
-        // Increment cycle counter for new random values
-        static int cycleCounter = 0;
-        cycleCounter++;
+        if (shouldStopPseudopod(locomotion, dt)) {
+            locomotion.lastAngle = locomotion.activeAngle;
+            locomotion.activeIndex = -1;
+            locomotion.activeTime = 0.0f;
+            locomotion.activeDuration = 0.0f;
+            locomotion.idleTime = 0.0f;
+            locomotion.zigzagSign = -locomotion.zigzagSign;
+        }
+        return;
+    }
 
-        // Choose new pseudopod target vertex when cycle resets
-        int vertexCount = microbe.softBody.vertexCount;
-        if (vertexCount > 0) {
-            // Pick a random vertex using microbe's unique seed
-            float vertexRand = hashToFloat(microbe.stats.seed, cycleCounter * 2);
-            loco.targetVertexIndex = (int)(vertexRand * vertexCount) % vertexCount;
+    locomotion.idleTime += dt;
+    if (locomotion.idleTime < START_COOLDOWN) {
+        return;
+    }
 
-            // Random direction in XZ plane using microbe's unique seed
-            float angle = hashToFloat(microbe.stats.seed, cycleCounter * 2 + 1) * 2.0f * PI;
-            loco.targetDirection = {cosf(angle), 0.0f, sinf(angle)};
+    if (tryStartPseudopod(locomotion, dt)) {
+        locomotion.targetDirection = {cosf(locomotion.activeAngle), 0.0f, sinf(locomotion.activeAngle)};
+        locomotion.idleTime = 0.0f;
+    }
+}
+
+void ECMLocomotionSystem::stepCortex(components::ECMLocomotion& locomotion, float dt) {
+    float nextMemory[CortexSamples];
+    float nextInhibitor[CortexSamples];
+
+    for (int i = 0; i < CortexSamples; i++) {
+        int left = (i - 1 + CortexSamples) % CortexSamples;
+        int right = (i + 1) % CortexSamples;
+
+        float lapM = locomotion.memory[left] + locomotion.memory[right] - 2.0f * locomotion.memory[i];
+        float lapL = locomotion.inhibitor[left] + locomotion.inhibitor[right] - 2.0f * locomotion.inhibitor[i];
+
+        float source = 0.0f;
+        if (locomotion.activeIndex >= 0) {
+            int dist = std::abs(i - locomotion.activeIndex);
+            dist = std::min(dist, CortexSamples - dist);
+            if (dist == 0) {
+                source = 1.0f;
+            } else if (dist == 1) {
+                source = 0.6f;
+            }
+        }
+
+        float mem = locomotion.memory[i] + dt * (K0 + K1 * source - locomotion.memory[i] / TAU_M + D_M * lapM);
+        float inh = locomotion.inhibitor[i] + dt * (K_L * source - locomotion.inhibitor[i] / TAU_L + D_L * lapL);
+
+        nextMemory[i] = std::max(0.0f, mem);
+        nextInhibitor[i] = std::max(0.0f, inh);
+    }
+
+    for (int i = 0; i < CortexSamples; i++) {
+        locomotion.memory[i] = nextMemory[i];
+        locomotion.inhibitor[i] = nextInhibitor[i];
+    }
+}
+
+bool ECMLocomotionSystem::shouldStopPseudopod(const components::ECMLocomotion& locomotion, float dt) {
+    if (locomotion.activeIndex < 0) {
+        return false;
+    }
+
+    if (locomotion.activeTime < MIN_PSEUDOPOD_DURATION) {
+        return false;
+    }
+
+    if (locomotion.activeTime >= locomotion.activeDuration) {
+        return true;
+    }
+
+    float localInhibitor = locomotion.inhibitor[locomotion.activeIndex];
+    float stopRate = MU * localInhibitor * localInhibitor * localInhibitor;
+    return rand01() < stopRate * dt;
+}
+
+bool ECMLocomotionSystem::tryStartPseudopod(components::ECMLocomotion& locomotion, float dt) {
+    float rates[CortexSamples];
+    float totalRate = 0.0f;
+
+    for (int i = 0; i < CortexSamples; i++) {
+        float mem = locomotion.memory[i];
+        float inh = locomotion.inhibitor[i];
+
+        float rate = ECM_EPSILON * mem * mem * mem / (1.0f + A * inh);
+
+        float angle = (2.0f * PI * (float)i) / (float)CortexSamples;
+        float side = sinf(angle - locomotion.lastAngle);
+        float zigzagBias = 1.0f + ZIGZAG_STRENGTH * (float)locomotion.zigzagSign * side;
+        rate *= std::max(0.1f, zigzagBias);
+
+        rates[i] = rate;
+        totalRate += rate;
+    }
+
+    if (totalRate <= 0.0f) {
+        return false;
+    }
+
+    float startChance = totalRate * dt;
+    if (rand01() >= std::min(1.0f, startChance)) {
+        return false;
+    }
+
+    float pick = rand01() * totalRate;
+    float accum = 0.0f;
+    int chosen = 0;
+    for (int i = 0; i < CortexSamples; i++) {
+        accum += rates[i];
+        if (pick <= accum) {
+            chosen = i;
+            break;
         }
     }
 
-    // Update phase flags
-    loco.isExtending = (loco.phase < EXTEND_PHASE);
-    loco.isSearching = (loco.phase >= EXTEND_PHASE && loco.phase < SEARCH_PHASE);
-    loco.isRetracting = (loco.phase >= SEARCH_PHASE);
+    locomotion.activeIndex = chosen;
+    locomotion.activeTime = 0.0f;
+    locomotion.activeDuration = MIN_PSEUDOPOD_DURATION +
+        rand01() * (MAX_PSEUDOPOD_DURATION - MIN_PSEUDOPOD_DURATION);
+    locomotion.activeAngle = (2.0f * PI * (float)chosen) / (float)CortexSamples;
 
-    // Apply forces based on current phase (to skeleton rigid bodies)
-    if (loco.isExtending) {
-        applyExtensionForces(microbe, skeleton, physics, dt);
-    } else if (loco.isSearching) {
-        applySearchForces(microbe, skeleton, physics, dt);
-    } else if (loco.isRetracting) {
-        applyRetractionForces(microbe, physics, dt);
-    }
-
-    // Update wiggle phase for lateral motion
-    loco.wigglePhase += dt * 2.0f; // Wiggle frequency
+    return true;
 }
 
-void ECMLocomotionSystem::applyExtensionForces(
-    components::Microbe& microbe,
-    components::InternalSkeleton& skeleton,
-    PhysicsSystemState* physics,
-    float dt
-) {
-    // Apply extension force to skeleton rigid bodies (Internal Motor model)
-    // Skeleton moves forward → hits interior of Skin → Skin stretches forward
-    if (skeleton.skeletonBodyIDs.empty()) return;
-
-    JPH::BodyInterface& bodyInterface = physics->physicsSystem->GetBodyInterface();
-
-    // Calculate force in target direction (horizontal only)
-    Vector3 dir = microbe.locomotion.targetDirection;
-    JPH::Vec3 force(
-        dir.x * PSEUDOPOD_EXTENSION_FORCE,
-        0.0f, // No vertical force
-        dir.z * PSEUDOPOD_EXTENSION_FORCE
-    );
-
-    // Apply force to all skeleton nodes (or select one based on targetVertexIndex)
-    int targetSkeletonIdx = microbe.locomotion.targetVertexIndex % (int)skeleton.skeletonBodyIDs.size();
-    JPH::BodyID skeletonBodyID = skeleton.skeletonBodyIDs[targetSkeletonIdx];
-
-    if (!skeletonBodyID.IsInvalid()) {
-        // Apply force at center of mass (skeleton node moves forward)
-        bodyInterface.AddForce(skeletonBodyID, force);
-    }
-}
-
-void ECMLocomotionSystem::applySearchForces(
-    components::Microbe& microbe,
-    components::InternalSkeleton& skeleton,
-    PhysicsSystemState* physics,
-    float dt
-) {
-    // Apply lateral wiggle to skeleton rigid bodies creating zig-zag motion
-    if (skeleton.skeletonBodyIDs.empty()) return;
-
-    JPH::BodyInterface& bodyInterface = physics->physicsSystem->GetBodyInterface();
-
-    // Wiggle perpendicular to target direction
-    Vector3 dir = microbe.locomotion.targetDirection;
-    float wiggle = sinf(microbe.locomotion.wigglePhase);
-
-    // Perpendicular direction in XZ plane
-    Vector3 perpDir = {-dir.z, 0.0f, dir.x};
-
-    // Calculate lateral wiggle force
-    JPH::Vec3 force(
-        perpDir.x * WIGGLE_FORCE * wiggle,
-        0.0f,
-        perpDir.z * WIGGLE_FORCE * wiggle
-    );
-
-    // Apply to target skeleton node
-    int targetSkeletonIdx = microbe.locomotion.targetVertexIndex % (int)skeleton.skeletonBodyIDs.size();
-    JPH::BodyID skeletonBodyID = skeleton.skeletonBodyIDs[targetSkeletonIdx];
-
-    if (!skeletonBodyID.IsInvalid()) {
-        bodyInterface.AddForce(skeletonBodyID, force);
-    }
-}
-
-void ECMLocomotionSystem::applyRetractionForces(
+void ECMLocomotionSystem::applyPseudopodForces(
+    components::ECMLocomotion& locomotion,
     components::Microbe& microbe,
     PhysicsSystemState* physics,
     float dt
 ) {
-    int targetIdx = microbe.locomotion.targetVertexIndex;
-    JPH::BodyID bodyID = microbe.softBody.bodyID;
-    if (bodyID.IsInvalid()) return;
+    if (locomotion.activeIndex < 0 || microbe.softBody.bodyID.IsInvalid()) {
+        return;
+    }
 
-    JPH::BodyLockWrite lock(physics->physicsSystem->GetBodyLockInterface(), bodyID);
-    if (!lock.Succeeded()) return;
+    float rampIn = std::min(1.0f, locomotion.activeTime / FORCE_RAMP_TIME);
+    float remaining = std::max(0.0f, locomotion.activeDuration - locomotion.activeTime);
+    float rampOut = std::min(1.0f, remaining / FORCE_RAMP_TIME);
+    float ramp = std::min(rampIn, rampOut);
+
+    Vector3 dir = locomotion.targetDirection;
+    float dirLenSq = dir.x * dir.x + dir.z * dir.z;
+    if (dirLenSq < 0.0001f) {
+        return;
+    }
+
+    JPH::BodyLockWrite lock(physics->physicsSystem->GetBodyLockInterface(), microbe.softBody.bodyID);
+    if (!lock.Succeeded()) {
+        return;
+    }
 
     JPH::Body& body = lock.GetBody();
     JPH::SoftBodyMotionProperties* motionProps =
         static_cast<JPH::SoftBodyMotionProperties*>(body.GetMotionProperties());
-    if (motionProps == nullptr) return;
+    if (!motionProps) {
+        return;
+    }
 
     JPH::Array<JPH::SoftBodyVertex>& vertices = motionProps->GetVertices();
-    if (targetIdx >= (int)vertices.size()) return;
+    if (vertices.empty()) {
+        return;
+    }
 
-    // 1. Calculate direction from Center-of-Mass to Target Vertex
-    JPH::RMat44 comTransform = JPH::RMat44::sRotationTranslation(body.GetRotation(), body.GetCenterOfMassPosition());
-    JPH::Vec3 worldPosVertex = comTransform * vertices[targetIdx].mPosition;
-    JPH::Vec3 center = body.GetCenterOfMassPosition();
+    JPH::Vec3 worldDir(dir.x, 0.0f, dir.z);
+    worldDir = worldDir.Normalized();
+    JPH::Quat invRot = body.GetRotation().Conjugated();
+    JPH::Vec3 localDir = invRot * worldDir;
+    float targetAngle = atan2f(localDir.GetZ(), localDir.GetX());
 
-    JPH::Vec3 pullDir = worldPosVertex - center;
-    float dist = pullDir.Length();
-    if (dist < 0.001f) return;
-    pullDir /= dist;
+    float minRadius = microbe.stats.baseRadius * 0.55f;
+    float maxRadius = microbe.stats.baseRadius * 1.0f;
+    float arc = PI / 5.0f;
+    float denom = std::max(0.001f, maxRadius - minRadius);
 
-    // 2. Normalize Force: Prevent "Force Explosion" by dividing by vertex count
-    float vertexCount = (float)vertices.size();
-    if (vertexCount <= 1.0f) return;
+    float impulse = FORCE_MAGNITUDE * ramp * dt;
+    float contractionImpulse = CONTRACTION_MAGNITUDE * ramp * dt;
+    float rearAngle = wrapAngle(targetAngle + PI);
+    body.AddForce(worldDir * (BODY_FORCE * microbe.stats.baseRadius * ramp));
 
-    float forcePerVertex = RETRACT_FORCE / (vertexCount - 1.0f);
-    float velocityMagnitude = forcePerVertex * dt * 5.0f; // 5x multiplier to overcome damping
-    JPH::Vec3 velocityImpulse = pullDir * velocityMagnitude;
+    for (auto& vertex : vertices) {
+        const JPH::Vec3& p = vertex.mPosition;
+        float radial = sqrtf(p.GetX() * p.GetX() + p.GetZ() * p.GetZ());
+        if (radial < minRadius) {
+            continue;
+        }
 
-    for (size_t i = 0; i < vertices.size(); ++i) {
-        if ((int)i == targetIdx) continue; // Don't move the foot (anchor)
-        vertices[i].mVelocity += velocityImpulse;
+        float angle = atan2f(p.GetZ(), p.GetX());
+        float radiusWeight = std::clamp((radial - minRadius) / denom, 0.0f, 1.0f);
+        if (radiusWeight <= 0.0f) {
+            continue;
+        }
+
+        float frontDelta = wrapAngle(angle - targetAngle);
+        float frontAbs = fabsf(frontDelta);
+        if (frontAbs <= arc) {
+            float angleWeight = cosf((frontAbs / arc) * (PI * 0.5f));
+            float weight = angleWeight * radiusWeight;
+            if (weight > 0.0f) {
+                vertex.mVelocity += localDir * (impulse * weight);
+            }
+        }
+
+        float rearDelta = wrapAngle(angle - rearAngle);
+        float rearAbs = fabsf(rearDelta);
+        if (rearAbs <= arc) {
+            float angleWeight = cosf((rearAbs / arc) * (PI * 0.5f));
+            float weight = angleWeight * radiusWeight;
+            if (weight > 0.0f) {
+                vertex.mVelocity -= localDir * (contractionImpulse * weight);
+            }
+        }
     }
 }
 

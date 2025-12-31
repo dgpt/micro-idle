@@ -55,9 +55,6 @@ flecs::entity ResourceSystem::spawnResource(flecs::world& world,
         .scale = {1.0f, 1.0f, 1.0f}
     });
 
-    printf("ResourceSystem: Spawned resource %d at (%.1f, %.1f, %.1f)\n",
-           (int)type, position.x, position.y, position.z);
-
     return entity;
 }
 
@@ -82,9 +79,6 @@ void ResourceSystem::collectResource(flecs::entity resourceEntity, flecs::world&
 
     // Destroy the resource entity
     resourceEntity.destruct();
-
-    printf("ResourceSystem: Collected %.2f of resource %d\n",
-           resource->amount, (int)resource->type);
 }
 
 void ResourceSystem::registerSystem(flecs::world& world) {
